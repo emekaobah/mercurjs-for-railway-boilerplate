@@ -1,4 +1,46 @@
 export type ShipbubbleMode = "delivery" | "pickup"
+export type ShipbubbleWebhookStatus =
+  | "pending"
+  | "confirmed"
+  | "picked_up"
+  | "in_transit"
+  | "completed"
+  | "cancelled"
+
+export type ShipbubbleSyncAction =
+  | "noop"
+  | "set_shipped"
+  | "set_delivered"
+  | "cancel_if_unshipped"
+  | "flag_exception"
+
+export interface ShipbubbleStatusHistoryEntry {
+  event_key: string
+  status: string
+  raw_status?: string | null
+  action: ShipbubbleSyncAction
+  tracking_number?: string | null
+  shipbubble_shipment_id?: string | null
+  occurred_at?: string | null
+  synced_at: string
+  error?: string
+}
+
+export interface ShipbubbleFulfillmentMetadata {
+  shipbubble_shipment_id?: string
+  tracking_number?: string
+  tracking_url?: string | null
+  label_url?: string | null
+  shipbubble_mode?: ShipbubbleMode
+  shipbubble_last_status?: ShipbubbleWebhookStatus | string
+  shipbubble_last_status_at?: string
+  shipbubble_last_event_key?: string
+  shipbubble_sync_exception?: string | null
+  shipbubble_status_history?: ShipbubbleStatusHistoryEntry[]
+  shipbubble_booking_failed?: boolean
+  shipbubble_booking_failed_at?: string | null
+  shipbubble_booking_error?: string | null
+}
 
 export interface ShipbubbleShippingOptionData {
   carrier_code: string

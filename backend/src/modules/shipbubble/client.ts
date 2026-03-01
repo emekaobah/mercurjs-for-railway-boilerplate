@@ -28,6 +28,14 @@ const toArray = <T>(value: unknown): T[] => {
   return value as T[]
 }
 
+const toRecord = (value: unknown): JsonRecord => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  return value as JsonRecord
+}
+
 const pickFirstString = (values: unknown[]): string | undefined => {
   for (const value of values) {
     if (value === null || value === undefined) {
@@ -145,6 +153,43 @@ const buildFallbackPackageItems = (input: {
       value: amount,
     },
   ]
+}
+
+const collectShipmentCandidates = (response: JsonRecord): JsonRecord[] => {
+  const root = toRecord(response)
+  const data = toRecord(root.data)
+  const nestedData = toRecord(data.data)
+
+  const recordCandidates = [
+    root,
+    data,
+    nestedData,
+    toRecord(root.shipment),
+    toRecord(data.shipment),
+    toRecord(nestedData.shipment),
+    toRecord(root.order),
+    toRecord(data.order),
+    toRecord(nestedData.order),
+    toRecord(root.label),
+    toRecord(data.label),
+  ]
+
+  const arrayCandidates = [
+    ...toArray<JsonRecord>(root.results),
+    ...toArray<JsonRecord>(root.shipments),
+    ...toArray<JsonRecord>(root.labels),
+    ...toArray<JsonRecord>(data.results),
+    ...toArray<JsonRecord>(data.shipments),
+    ...toArray<JsonRecord>(data.labels),
+    ...toArray<JsonRecord>(data.data),
+    ...toArray<JsonRecord>(nestedData.results),
+    ...toArray<JsonRecord>(nestedData.shipments),
+    ...toArray<JsonRecord>(nestedData.labels),
+  ]
+
+  return [...recordCandidates, ...arrayCandidates].filter(
+    (entry) => Object.keys(entry).length > 0
+  )
 }
 
 export class ShipbubbleClient {
@@ -612,45 +657,93 @@ export class ShipbubbleClient {
       payloads
     )
 
-    const shipment =
-      (response.data as JsonRecord | undefined)?.shipment ??
-      response.shipment ??
-      response.data ??
-      response
+    const candidates = collectShipmentCandidates(response)
+    const valuesFromCandidates = (keys: string[]) =>
+      candidates.flatMap((candidate) => keys.map((key) => candidate[key]))
 
-    const shipbubbleShipmentId = pickFirstString([
-      shipment.id,
-      shipment.shipment_id,
-      shipment.reference,
-      shipment.order_reference,
-      shipment.waybill,
-      shipment.awb,
+    let shipbubbleShipmentId = pickFirstString([
+      response.shipment_id,
+      response.id,
+      response.reference,
+      response.order_reference,
+      response.data?.shipment_id,
+      response.data?.id,
+      ...valuesFromCandidates([
+        "shipment_id",
+        "id",
+        "reference",
+        "order_reference",
+        "order_id",
+        "label_id",
+        "waybill",
+        "awb",
+      ]),
     ])
 
-    const trackingNumber = pickFirstString([
-      shipment.tracking_number,
-      shipment.tracking_no,
-      shipment.waybill,
-      shipment.awb,
-      shipment.reference,
+    let trackingNumber = pickFirstString([
+      response.tracking_number,
+      response.tracking_no,
+      response.waybill,
+      response.awb,
+      response.data?.tracking_number,
+      response.data?.tracking_no,
+      response.data?.waybill,
+      response.data?.awb,
+      ...valuesFromCandidates([
+        "tracking_number",
+        "tracking_no",
+        "tracking",
+        "tracking_id",
+        "waybill",
+        "awb",
+      ]),
     ])
+
+    // Some successful label bookings return only one of these fields.
+    if (!shipbubbleShipmentId && trackingNumber) {
+      shipbubbleShipmentId = trackingNumber
+    }
+
+    if (!trackingNumber && shipbubbleShipmentId) {
+      trackingNumber = shipbubbleShipmentId
+    }
 
     if (!shipbubbleShipmentId || !trackingNumber) {
-      throw new Error("ShipBubble shipment booking returned incomplete data")
+      const rootKeys = Object.keys(toRecord(response)).slice(0, 15).join(", ")
+      const dataKeys = Object.keys(toRecord(response.data)).slice(0, 15).join(", ")
+      throw new Error(
+        `ShipBubble shipment booking returned incomplete data (root keys: ${rootKeys || "none"}; data keys: ${dataKeys || "none"})`
+      )
     }
 
     return {
       shipbubble_shipment_id: shipbubbleShipmentId,
       tracking_number: trackingNumber,
       tracking_url: pickFirstString([
-        shipment.tracking_url,
-        shipment.tracking_link,
-        shipment.tracking?.url,
+        response.tracking_url,
+        response.tracking_link,
+        response.data?.tracking_url,
+        response.data?.tracking_link,
+        ...valuesFromCandidates([
+          "tracking_url",
+          "tracking_link",
+          "tracking_page",
+          "tracking_page_url",
+        ]),
       ]),
       label_url: pickFirstString([
-        shipment.label_url,
-        shipment.label,
-        shipment.label?.url,
+        response.label_url,
+        response.label,
+        response.data?.label_url,
+        response.data?.label,
+        ...valuesFromCandidates([
+          "label_url",
+          "label",
+          "label_link",
+          "label_download_url",
+          "label_pdf_url",
+          "waybill_url",
+        ]),
       ]),
       raw: response,
     }

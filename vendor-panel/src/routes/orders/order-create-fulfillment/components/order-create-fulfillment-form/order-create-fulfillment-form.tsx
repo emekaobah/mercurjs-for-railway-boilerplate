@@ -136,8 +136,6 @@ export function OrderCreateFulfillmentForm({
     } = {
       location_id: selectedLocationId,
       requires_shipping: true,
-      // shipping_option_id: shippingOptionId,
-      // no_notification: !data.send_notification,
       items: Object.entries(data.quantity)
         .filter(
           ([id, value]) =>

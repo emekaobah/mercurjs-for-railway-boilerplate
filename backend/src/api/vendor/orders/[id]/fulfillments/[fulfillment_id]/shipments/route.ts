@@ -1,15 +1,18 @@
 import { createOrderShipmentWorkflow } from "@medusajs/medusa/core-flows"
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import {
+  ContainerRegistrationKeys,
+  MedusaError,
+} from "@medusajs/framework/utils"
 import ShipbubbleFulfillmentProviderService, {
   getShipbubbleRuntimeConfig,
 } from "../../../../../../../modules/shipbubble/service"
 import {
-  isAddressComplete,
   normalizeAddress,
 } from "../../../../../../../modules/shipbubble/utils/address"
 import { buildPackageFromItems } from "../../../../../../../modules/shipbubble/utils/package"
 import {
+  ShipbubbleFulfillmentMetadata,
   ShipbubbleShippingOptionData,
 } from "../../../../../../../modules/shipbubble/types"
 
@@ -34,6 +37,11 @@ type VendorOrderCreateShipmentBody = {
     quantity: number
   }>
   labels?: VendorShipmentLabel[]
+}
+
+type VendorShipmentItemInput = {
+  id: string
+  quantity: number
 }
 
 const isShipbubbleProvider = (providerId: string | undefined) =>
@@ -71,11 +79,154 @@ const getFulfillmentById = (
   )
 }
 
+const toNonEmptyString = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return ""
+  }
+
+  return value.trim()
+}
+
+const toPositiveIntegerOrNull = (value: unknown): number | null => {
+  const parsed = Number(value)
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null
+  }
+
+  return parsed
+}
+
+const normalizeShipmentLabels = (
+  labels: unknown
+): VendorShipmentLabel[] => {
+  if (!Array.isArray(labels)) {
+    return []
+  }
+
+  const normalized: VendorShipmentLabel[] = []
+
+  for (const label of labels) {
+    const entry = (label || {}) as Record<string, unknown>
+    const trackingNumber = toNonEmptyString(entry.tracking_number)
+    const trackingUrl = toNonEmptyString(entry.tracking_url)
+    const labelUrl = toNonEmptyString(entry.label_url)
+
+    if (!trackingNumber) {
+      continue
+    }
+
+    normalized.push({
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl,
+      label_url: labelUrl,
+    })
+  }
+
+  return normalized
+}
+
+const normalizeShipmentItems = (
+  items: unknown
+): VendorShipmentItemInput[] => {
+  if (!Array.isArray(items)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "`items` must be a non-empty array."
+    )
+  }
+
+  const normalized: VendorShipmentItemInput[] = []
+
+  for (const item of items) {
+    const entry = (item || {}) as Record<string, unknown>
+    const id = toNonEmptyString(entry.id)
+    const quantity = toPositiveIntegerOrNull(entry.quantity)
+
+    if (!id || !quantity) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Each shipment item must include a valid `id` and positive integer `quantity`."
+      )
+    }
+
+    normalized.push({
+      id,
+      quantity,
+    })
+  }
+
+  if (!normalized.length) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "At least one shipment item is required."
+    )
+  }
+
+  return normalized
+}
+
+const assertShipmentItemsMatchFulfillment = (
+  requestedItems: VendorShipmentItemInput[],
+  fulfillment: Record<string, any> | null
+) => {
+  const fulfillmentItems = Array.isArray(fulfillment?.items)
+    ? (fulfillment?.items as Array<Record<string, unknown>>)
+    : []
+
+  if (!fulfillmentItems.length) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "The selected fulfillment has no items to ship."
+    )
+  }
+
+  const fulfillmentQtyByLineItemId = new Map<string, number>()
+
+  for (const item of fulfillmentItems) {
+    const lineItemId = toNonEmptyString((item as any)?.line_item_id)
+    const quantity = Number((item as any)?.quantity || 0)
+
+    if (!lineItemId || !Number.isFinite(quantity) || quantity <= 0) {
+      continue
+    }
+
+    fulfillmentQtyByLineItemId.set(lineItemId, quantity)
+  }
+
+  if (!fulfillmentQtyByLineItemId.size) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "Unable to resolve line items for the selected fulfillment."
+    )
+  }
+
+  for (const item of requestedItems) {
+    const maxQty = fulfillmentQtyByLineItemId.get(item.id)
+
+    if (!maxQty) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Line item ${item.id} does not belong to the selected fulfillment.`
+      )
+    }
+
+    if (item.quantity > maxQty) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `Line item ${item.id} quantity exceeds the fulfillment quantity.`
+      )
+    }
+  }
+}
+
 export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
   const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
 
-  const body = req.validatedBody as VendorOrderCreateShipmentBody
+  const body = ((req.validatedBody as any) ?? (req.body as any) ?? {}) as VendorOrderCreateShipmentBody
+  const normalizedItems = normalizeShipmentItems(body.items)
+  const fallbackLabels = normalizeShipmentLabels(body.labels)
 
   const {
     data: [order],
@@ -90,6 +241,8 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
         "items.*",
         "items.variant.*",
         "fulfillments.*",
+        "fulfillments.items.*",
+        "fulfillments.labels.*",
         "shipping_methods.*",
       ],
       filters: {
@@ -102,23 +255,113 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   )
 
   const fulfillment = getFulfillmentById(order, req.params.fulfillment_id)
+  if (!fulfillment) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      "Fulfillment not found on order."
+    )
+  }
+
+  if (fulfillment.shipped_at || fulfillment.delivered_at) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "This fulfillment has already been shipped."
+    )
+  }
+
+  assertShipmentItemsMatchFulfillment(normalizedItems, fulfillment)
+
   const fulfillmentProviderId = String(fulfillment?.provider_id || "")
   const shouldUseShipbubble = isShipbubbleProvider(fulfillmentProviderId)
 
-  let labels = body.labels ?? []
-  let metadata: Record<string, unknown> | undefined
+  let labels = fallbackLabels
+  let metadata: ShipbubbleFulfillmentMetadata | undefined
 
   if (shouldUseShipbubble) {
+    const existingMetadata = (fulfillment.metadata || {}) as Record<
+      string,
+      unknown
+    >
+    const existingShipmentId = toNonEmptyString(
+      existingMetadata.shipbubble_shipment_id
+    )
+
+    if (existingShipmentId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "A ShipBubble shipment is already linked to this fulfillment."
+      )
+    }
+
     const shipbubbleConfig = getShipbubbleRuntimeConfig()
     const shipbubbleService = new ShipbubbleFulfillmentProviderService(
       { logger },
       shipbubbleConfig
     )
 
-    const shippingOptionId =
-      fulfillment?.shipping_option_id ||
-      (order.shipping_methods as Array<Record<string, unknown>> | undefined)?.[0]
-        ?.shipping_option_id
+    const shippingMethods =
+      (order.shipping_methods as Array<Record<string, unknown>> | undefined) || []
+    const shippingOptionIds = [...new Set(
+      shippingMethods
+        .map((method) => toNonEmptyString(method.shipping_option_id))
+        .filter(Boolean)
+    )]
+
+    const shippingOptionsById = new Map<string, Record<string, unknown>>()
+
+    if (shippingOptionIds.length) {
+      const { data: shippingOptions } = await query.graph({
+        entity: "shipping_option",
+        fields: [
+          "id",
+          "provider_id",
+          "data",
+          "service_zone.fulfillment_set.location.id",
+        ],
+        filters: {
+          id: shippingOptionIds as any,
+        },
+      })
+
+      for (const option of shippingOptions || []) {
+        const optionId = toNonEmptyString((option as any)?.id)
+        if (!optionId) {
+          continue
+        }
+
+        shippingOptionsById.set(optionId, option as Record<string, unknown>)
+      }
+    }
+
+    const fulfillmentLocationId = toNonEmptyString(fulfillment?.location_id)
+    let shippingOptionId = toNonEmptyString(fulfillment?.shipping_option_id)
+
+    if (!shippingOptionId && shippingOptionIds.length) {
+      const shipbubbleLocationMatchedOptionId = shippingOptionIds.find((optionId) => {
+        const option = shippingOptionsById.get(optionId) || {}
+        const providerId = toNonEmptyString(option.provider_id)
+        const optionLocationId = toNonEmptyString(
+          (option as any)?.service_zone?.fulfillment_set?.location?.id
+        )
+
+        return (
+          isShipbubbleProvider(providerId) &&
+          !!fulfillmentLocationId &&
+          optionLocationId === fulfillmentLocationId
+        )
+      })
+
+      const firstShipbubbleOptionId = shippingOptionIds.find((optionId) => {
+        const option = shippingOptionsById.get(optionId) || {}
+        return isShipbubbleProvider(toNonEmptyString(option.provider_id))
+      })
+
+      shippingOptionId =
+        shipbubbleLocationMatchedOptionId ||
+        firstShipbubbleOptionId ||
+        shippingOptionIds[0] ||
+        ""
+    }
 
     let shippingOptionData: ShipbubbleShippingOptionData = {
       carrier_code: "auto",
@@ -130,15 +373,17 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     let selectedQuote: ShipbubbleSelectedQuote | undefined
 
     if (shippingOptionId) {
-      const {
-        data: [shippingOption],
-      } = await query.graph({
-        entity: "shipping_option",
-        fields: ["id", "provider_id", "data"],
-        filters: {
-          id: shippingOptionId,
-        },
-      })
+      const shippingOption =
+        shippingOptionsById.get(shippingOptionId) ||
+        (
+          await query.graph({
+            entity: "shipping_option",
+            fields: ["id", "provider_id", "data"],
+            filters: {
+              id: shippingOptionId,
+            },
+          })
+        ).data?.[0]
 
       if (shippingOption?.data) {
         shippingOptionData = normalizeShipbubbleOptionData(
@@ -147,8 +392,6 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
       }
     }
 
-    const shippingMethods =
-      (order.shipping_methods as Array<Record<string, unknown>> | undefined) || []
     const selectedShippingMethod =
       shippingMethods.find(
         (method) => String(method.shipping_option_id || "") === String(shippingOptionId || "")
@@ -174,6 +417,13 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
       }
     }
 
+    if (shippingOptionData.mode === "pickup") {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "ShipBubble pickup fulfillments must be completed with 'Mark as picked up', not shipment booking."
+      )
+    }
+
     try {
       if ((order.currency_code || "").toLowerCase() !== "ngn") {
         throw new Error("ShipBubble shipment booking is only supported for NGN")
@@ -196,17 +446,11 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
         (order.shipping_address || null) as Record<string, unknown> | null
       )
 
-      if (!isAddressComplete(senderAddress) || !isAddressComplete(receiverAddress)) {
-        throw new Error(
-          "ShipBubble requires complete stock-location and delivery addresses"
-        )
-      }
-
-      const sender = senderAddress as NonNullable<typeof senderAddress>
-      const receiver = receiverAddress as NonNullable<typeof receiverAddress>
+      const sender = (senderAddress || {}) as NonNullable<typeof senderAddress>
+      const receiver = (receiverAddress || {}) as NonNullable<typeof receiverAddress>
 
       const itemQtyMap = new Map(
-        body.items.map((item) => [item.id, Number(item.quantity) || 0])
+        normalizedItems.map((item) => [item.id, Number(item.quantity) || 0])
       )
 
       const packageItems = ((order.items as Array<Record<string, unknown>>) || [])
@@ -253,13 +497,30 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
         tracking_number: shipment.tracking_number,
         tracking_url: shipment.tracking_url || null,
         label_url: shipment.label_url || null,
+        shipbubble_mode: shippingOptionData.mode,
+        shipbubble_booking_failed: false,
+        shipbubble_booking_failed_at: null,
+        shipbubble_booking_error: null,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error"
       logger.warn(
         `ShipBubble booking failed for fulfillment ${req.params.fulfillment_id}: ${message}`
       )
-      labels = body.labels ?? []
+
+      if (!fallbackLabels.length) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          `ShipBubble booking failed: ${message}`
+        )
+      }
+
+      labels = fallbackLabels
+      metadata = {
+        shipbubble_booking_failed: true,
+        shipbubble_booking_failed_at: new Date().toISOString(),
+        shipbubble_booking_error: message,
+      }
     }
   }
 
@@ -267,6 +528,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     container: req.scope,
     input: {
       ...body,
+      items: normalizedItems,
       order_id: req.params.id,
       fulfillment_id: req.params.fulfillment_id,
       labels,
