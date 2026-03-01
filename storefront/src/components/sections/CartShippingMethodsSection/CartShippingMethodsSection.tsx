@@ -1,7 +1,7 @@
 "use client"
 
 import ErrorMessage from "@/components/molecules/ErrorMessage/ErrorMessage"
-import { setShippingMethod } from "@/lib/data/cart"
+import { removeShippingMethod, setShippingMethod } from "@/lib/data/cart"
 import {
   calculatePriceForShippingOption,
   listCartShippingMethods,
@@ -154,6 +154,7 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
   const router = useRouter()
   const pathname = usePathname()
   const lastRequestValueBySellerRef = useRef<Record<string, string>>({})
+  const hasAutoSelectedBySellerRef = useRef<Record<string, boolean>>({})
 
   const shippingMethods = useMemo(
     () =>
@@ -213,7 +214,7 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
         setLiveShippingMethods(methods as StoreCardShippingMethod[])
       }
     })
-  }, [availableShippingMethods, cart.id, cart.shipping_methods?.length])
+  }, [availableShippingMethods, cart.id])
 
   const shipbubbleCalculatedOptions = useMemo(
     () =>
@@ -246,6 +247,11 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
   const appliedShippingOptionIdsKey = useMemo(
     () => [...new Set(appliedShippingOptionIds)].sort().join("|"),
     [appliedShippingOptionIds]
+  )
+
+  const shipbubbleQuotesKey = useMemo(
+    () => Object.keys(shipbubbleQuotesMap).sort().join("|"),
+    [shipbubbleQuotesMap]
   )
 
   useEffect(() => {
@@ -397,6 +403,77 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
     }
   }, [cart.id, shipbubbleQuotesMap])
 
+  // Auto-select the recommended ShipBubble quote when quotes first load and no option is
+  // visually selected (e.g. because the stored quote_id from a previous session no longer
+  // matches the fresh ephemeral IDs returned by the ShipBubble API).
+  useEffect(() => {
+    if (!shipbubbleQuotesKey) {
+      return
+    }
+
+    groupedSellerEntries.forEach(([sellerId, methods]) => {
+      // Only attempt once per seller per component mount.
+      if (hasAutoSelectedBySellerRef.current[sellerId]) {
+        return
+      }
+
+      // User already made a successful manual selection this session.
+      if (selectedDeliveryValueMap[sellerId]) {
+        return
+      }
+
+      // Build the delivery options list the same way the render does.
+      const deliveryOptions = methods.reduce((acc: DeliveryListOption[], option) => {
+        if (
+          isShipbubbleOption(option) &&
+          shipbubbleQuotesMap[option.id]?.quotes?.length
+        ) {
+          const quotesPayload = shipbubbleQuotesMap[option.id]
+          quotesPayload.quotes.forEach((quote) => {
+            acc.push({
+              value: `${option.id}::${quote.quote_id}`,
+              optionId: option.id,
+              name:
+                quote.courier_name ||
+                quote.service_name ||
+                option.name ||
+                "Delivery",
+              amount: quote.amount,
+              priceType: "calculated",
+              quote,
+              quoteId: quote.quote_id,
+              recommended:
+                quotesPayload.recommended_quote_id === quote.quote_id,
+            })
+          })
+        }
+        return acc
+      }, [])
+
+      if (!deliveryOptions.length) {
+        return
+      }
+
+      // If the cart already has a method whose quote_id matches a current option, the
+      // radio will resolve correctly — no auto-selection needed.
+      const resolvedValue = resolveSelectedDeliveryValue(sellerId, deliveryOptions, methods)
+      if (resolvedValue) {
+        return
+      }
+
+      // Pick the recommended option, or fall back to the first available.
+      const optionToSelect =
+        deliveryOptions.find((opt) => opt.recommended) || deliveryOptions[0]
+
+      if (!optionToSelect) {
+        return
+      }
+
+      hasAutoSelectedBySellerRef.current[sellerId] = true
+      handleSetShippingMethod(sellerId, optionToSelect.value, methods)
+    })
+  }, [shipbubbleQuotesKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSubmit = () => {
     router.push(pathname + "?step=payment", { scroll: false })
   }
@@ -454,6 +531,27 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
       setIsLoadingPrices(true)
       setIsSubmittingBySeller((prev) => ({ ...prev, [sellerId]: true }))
       lastRequestValueBySellerRef.current[sellerId] = selectedValue
+
+      // Remove any existing method with the same option_id before adding the new one.
+      // MercurJS validates that option_ids (existing + new) have no duplicates, so if the
+      // user is switching quotes within the same ShipBubble option this would otherwise 400.
+      const existingCartMethod = (
+        (cart.shipping_methods || []) as Array<Record<string, unknown>>
+      ).find((method) => {
+        const appliedOptionId = String(
+          method.shipping_option_id ||
+            (method.shipping_option as Record<string, unknown> | undefined)?.id ||
+            ""
+        )
+        return appliedOptionId === optionId
+      })
+      if (existingCartMethod) {
+        const existingMethodId = String(existingCartMethod.id || "")
+        if (existingMethodId) {
+          await removeShippingMethod(existingMethodId)
+        }
+      }
+
       const res = await setShippingMethod({
         cartId: cart.id,
         shippingMethodId: optionId,
