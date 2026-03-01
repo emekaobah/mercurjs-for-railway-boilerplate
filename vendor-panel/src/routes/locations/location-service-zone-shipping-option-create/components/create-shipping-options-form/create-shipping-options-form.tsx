@@ -54,7 +54,7 @@ export function CreateShippingOptionsForm({
       price_type: ShippingOptionPriceType.FlatRate,
       enabled_in_store: true,
       shipping_profile_id: "",
-      provider_id: "manual_manual",
+      provider_id: "",
       fulfillment_option_id: "",
       region_prices: {},
       currency_prices: {},
@@ -108,7 +108,32 @@ export function CreateShippingOptionsForm({
 
     const fulfillmentOptionData = fulfillmentProviderOptions?.find(
       (fo) => fo.id === data.fulfillment_option_id
-    )!
+    ) as Record<string, any> | undefined
+
+    const isShipbubbleProvider = data.provider_id
+      .toLowerCase()
+      .includes("shipbubble")
+
+    const providerData = isShipbubbleProvider
+      ? {
+          ...(fulfillmentOptionData as Record<string, unknown>),
+          carrier_code:
+            typeof fulfillmentOptionData?.carrier_code === "string"
+              ? fulfillmentOptionData.carrier_code
+              : "auto",
+          service_code:
+            typeof fulfillmentOptionData?.service_code === "string"
+              ? fulfillmentOptionData.service_code
+              : "auto",
+          service_name:
+            typeof fulfillmentOptionData?.service_name === "string"
+              ? fulfillmentOptionData.service_name
+              : "Auto Select",
+          mode:
+            fulfillmentOptionData?.mode === "pickup" ? "pickup" : "delivery",
+          insurance_enabled: Boolean(fulfillmentOptionData?.insurance_enabled),
+        }
+      : ((fulfillmentOptionData as Record<string, unknown>) ?? {})
 
     await mutateAsync(
       {
@@ -117,7 +142,7 @@ export function CreateShippingOptionsForm({
         shipping_profile_id: data.shipping_profile_id,
         provider_id: data.provider_id,
         prices: [...currencyPrices, ...regionPrices],
-        data: fulfillmentOptionData as unknown as Record<string, unknown>,
+        data: providerData,
         rules: [
           {
             value: isReturn ? "true" : "false",

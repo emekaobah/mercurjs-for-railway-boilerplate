@@ -2,17 +2,20 @@
 
 import ErrorMessage from "@/components/molecules/ErrorMessage/ErrorMessage"
 import { setShippingMethod } from "@/lib/data/cart"
-import { calculatePriceForShippingOption } from "@/lib/data/fulfillment"
+import {
+  calculatePriceForShippingOption,
+  listCartShippingMethods,
+  listShipbubbleQuotes,
+  ShipbubbleQuote,
+  ShipbubbleQuotesResponse,
+} from "@/lib/data/fulfillment"
 import { convertToLocale } from "@/lib/helpers/money"
-import { CheckCircleSolid, ChevronUpDown, Loader } from "@medusajs/icons"
+import { CheckCircleSolid } from "@medusajs/icons"
 import { HttpTypes } from "@medusajs/types"
-import { clx, Heading, Text } from "@medusajs/ui"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Fragment, useEffect, useState } from "react"
+import { Heading, Text } from "@medusajs/ui"
+import { usePathname, useRouter } from "next/navigation"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/atoms"
-import { CartShippingMethodRow } from "./CartShippingMethodRow"
-import { Listbox, Transition } from "@headlessui/react"
-import clsx from "clsx"
 
 // Extended cart item product type to include seller
 type ExtendedStoreProduct = HttpTypes.StoreProduct & {
@@ -30,6 +33,7 @@ type CartItem = {
 
 export type StoreCardShippingMethod = HttpTypes.StoreCartShippingOption & {
   seller_id?: string
+  seller_name?: string
   service_zone?: {
     fulfillment_set: {
       type: string
@@ -42,24 +46,104 @@ type ShippingProps = {
     items?: CartItem[]
   }
   availableShippingMethods:
-    | (StoreCardShippingMethod &
-        {
-          rules: any
-          seller_id: string
-          price_type: string
-          id: string
-          amount?: number
-        }[])
+    | (StoreCardShippingMethod & {
+        rules: any
+        seller_id: string
+        price_type: string
+        id: string
+        amount?: number
+      })[]
     | null
+}
+
+type DeliveryListOption = {
+  value: string
+  optionId: string
+  name: string
+  amount?: number
+  priceType: string
+  quote?: ShipbubbleQuote
+  quoteId?: string
+  recommended?: boolean
+}
+
+const isShipbubbleOption = (option: StoreCardShippingMethod) =>
+  String((option as any).provider_id || "")
+    .toLowerCase()
+    .includes("shipbubble")
+
+const SHIPBUBBLE_QUOTES_STRATEGY: "best_value" | "cheapest" | "fastest" | "all" =
+  "all"
+const SHIPPING_METHODS_CACHE_PREFIX = "checkout:shipping-methods:"
+const SHIPBUBBLE_QUOTES_CACHE_PREFIX = "checkout:shipbubble-quotes:"
+
+const parseDateLike = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed.length) {
+    return null
+  }
+
+  const normalized = trimmed.includes("T")
+    ? trimmed
+    : trimmed.replace(" ", "T")
+  const parsed = new Date(normalized)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return parsed
+}
+
+const getQuoteTimelineLabel = (quote?: ShipbubbleQuote) => {
+  if (!quote) {
+    return null
+  }
+
+  const etaCandidate = quote.delivery_eta_time || quote.delivery_eta
+  if (etaCandidate) {
+    const parsed = parseDateLike(etaCandidate)
+    if (parsed) {
+      const timeText = new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(parsed)
+      const dateText = new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+      }).format(parsed)
+
+      return `Expected delivery - ${timeText}, ${dateText}`
+    }
+  }
+
+  if (quote.eta_days !== undefined && quote.eta_days !== null) {
+    const dayLabel = quote.eta_days === 1 ? "day" : "days"
+    return `Expected delivery - in ${quote.eta_days} ${dayLabel}`
+  }
+
+  return null
 }
 
 const CartShippingMethodsSection: React.FC<ShippingProps> = ({
   cart,
   availableShippingMethods,
 }) => {
+  const [liveShippingMethods, setLiveShippingMethods] = useState<
+    StoreCardShippingMethod[] | null
+  >(availableShippingMethods as StoreCardShippingMethod[] | null)
   const [isLoadingPrices, setIsLoadingPrices] = useState(false)
   const [calculatedPricesMap, setCalculatedPricesMap] = useState<
     Record<string, number>
+  >({})
+  const [shipbubbleQuotesMap, setShipbubbleQuotesMap] = useState<
+    Record<string, ShipbubbleQuotesResponse>
+  >({})
+  const [selectedDeliveryValueMap, setSelectedDeliveryValueMap] = useState<
+    Record<string, string>
+  >({})
+  const [isSubmittingBySeller, setIsSubmittingBySeller] = useState<
+    Record<string, boolean>
   >({})
   const [error, setError] = useState<string | null>(null)
   const [missingModal, setMissingModal] = useState(false)
@@ -67,16 +151,101 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
     string[]
   >([])
 
-  const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+  const lastRequestValueBySellerRef = useRef<Record<string, string>>({})
 
-  const isOpen = searchParams.get("step") === "delivery"
+  const shippingMethods = useMemo(
+    () =>
+      (liveShippingMethods || []).filter(
+        (sm) =>
+          sm.rules?.find((rule: any) => rule.attribute === "is_return")
+            ?.value !== "true"
+      ),
+    [liveShippingMethods]
+  )
 
-  const _shippingMethods = availableShippingMethods?.filter(
-    (sm) =>
-      sm.rules?.find((rule: any) => rule.attribute === "is_return")?.value !==
-      "true"
+  useEffect(() => {
+    if (typeof window === "undefined" || !cart.id || !shippingMethods.length) {
+      return
+    }
+
+    window.localStorage.setItem(
+      `${SHIPPING_METHODS_CACHE_PREFIX}${cart.id}`,
+      JSON.stringify(shippingMethods)
+    )
+  }, [cart.id, shippingMethods])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !cart.id || shippingMethods.length) {
+      return
+    }
+
+    const raw = window.localStorage.getItem(
+      `${SHIPPING_METHODS_CACHE_PREFIX}${cart.id}`
+    )
+    if (!raw) {
+      return
+    }
+
+    try {
+      const cached = JSON.parse(raw) as StoreCardShippingMethod[]
+      if (Array.isArray(cached) && cached.length) {
+        setLiveShippingMethods(cached)
+      }
+    } catch {
+      // Ignore malformed cache.
+    }
+  }, [cart.id, shippingMethods.length])
+
+  useEffect(() => {
+    if (availableShippingMethods?.length) {
+      setLiveShippingMethods(availableShippingMethods as StoreCardShippingMethod[])
+      return
+    }
+
+    if (!cart.id) {
+      return
+    }
+
+    listCartShippingMethods(cart.id, false).then((methods) => {
+      if (methods?.length) {
+        setLiveShippingMethods(methods as StoreCardShippingMethod[])
+      }
+    })
+  }, [availableShippingMethods, cart.id, cart.shipping_methods?.length])
+
+  const shipbubbleCalculatedOptions = useMemo(
+    () =>
+      (shippingMethods || []).filter(
+        (sm) => sm.price_type === "calculated" && isShipbubbleOption(sm)
+      ),
+    [shippingMethods]
+  )
+
+  const appliedShippingOptionIds = useMemo(() => {
+    return ((cart.shipping_methods || []) as Array<Record<string, unknown>>)
+      .map((method) =>
+        String(
+          method.shipping_option_id ||
+            (method.shipping_option as Record<string, unknown> | undefined)?.id ||
+            ""
+        )
+      )
+      .filter(Boolean)
+  }, [cart.shipping_methods])
+
+  const shipbubbleOptionsKey = useMemo(
+    () =>
+      shipbubbleCalculatedOptions
+        .map((option) => option.id)
+        .sort()
+        .join("|"),
+    [shipbubbleCalculatedOptions]
+  )
+  const appliedShippingOptionIdsKey = useMemo(
+    () => [...new Set(appliedShippingOptionIds)].sort().join("|"),
+    [appliedShippingOptionIds]
   )
 
   useEffect(() => {
@@ -87,7 +256,7 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
       }
     })
 
-    const sellerMethods = _shippingMethods?.map(({ seller_id }) => seller_id)
+    const sellerMethods = shippingMethods?.map(({ seller_id }) => seller_id)
 
     const missingSellerIds = [...set].filter(
       (sellerId) => !sellerMethods?.includes(sellerId)
@@ -98,15 +267,16 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
     if (missingSellerIds.length > 0 && !cart.shipping_methods?.length) {
       setMissingModal(true)
     }
-  }, [cart])
+  }, [cart, shippingMethods])
 
   useEffect(() => {
-    if (_shippingMethods?.length) {
-      const promises = _shippingMethods
-        .filter((sm) => sm.price_type === "calculated")
+    if (shippingMethods?.length) {
+      const promises = shippingMethods
+        .filter((sm) => sm.price_type === "calculated" && !isShipbubbleOption(sm))
         .map((sm) => calculatePriceForShippingOption(sm.id, cart.id))
 
       if (promises.length) {
+        setIsLoadingPrices(true)
         Promise.allSettled(promises).then((res) => {
           const pricesMap: Record<string, number> = {}
           res
@@ -116,29 +286,187 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
           setCalculatedPricesMap(pricesMap)
           setIsLoadingPrices(false)
         })
+      } else {
+        setIsLoadingPrices(false)
       }
     }
-  }, [availableShippingMethods])
+  }, [shippingMethods, cart.id])
+
+  useEffect(() => {
+    if (!shipbubbleCalculatedOptions.length) {
+      return
+    }
+
+    Promise.allSettled(
+      shipbubbleCalculatedOptions.map((option) =>
+        listShipbubbleQuotes(cart.id, option.id, SHIPBUBBLE_QUOTES_STRATEGY)
+      )
+    ).then((results) => {
+      setShipbubbleQuotesMap((previous) => {
+        const next: Record<string, ShipbubbleQuotesResponse> = {}
+        const activeOptionIds = new Set(
+          shipbubbleCalculatedOptions.map((option) => option.id)
+        )
+
+        Object.entries(previous).forEach(([optionId, payload]) => {
+          if (activeOptionIds.has(optionId)) {
+            next[optionId] = payload
+          }
+        })
+
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled" || !result.value?.quotes?.length) {
+            return
+          }
+
+          next[shipbubbleCalculatedOptions[index].id] = result.value
+        })
+
+        return next
+      })
+    })
+  }, [shipbubbleOptionsKey, cart.id])
+
+  useEffect(() => {
+    if (shipbubbleCalculatedOptions.length || !appliedShippingOptionIds.length) {
+      return
+    }
+
+    const uniqueOptionIds = [...new Set(appliedShippingOptionIds)]
+    const missingOptionIds = uniqueOptionIds.filter(
+      (optionId) => !shipbubbleQuotesMap[optionId]
+    )
+
+    if (!missingOptionIds.length) {
+      return
+    }
+
+    Promise.allSettled(
+      missingOptionIds.map((optionId) =>
+        listShipbubbleQuotes(cart.id, optionId, SHIPBUBBLE_QUOTES_STRATEGY)
+      )
+    ).then((results) => {
+      setShipbubbleQuotesMap((previous) => {
+        const next = { ...previous }
+
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled" || !result.value?.quotes?.length) {
+            return
+          }
+
+          next[missingOptionIds[index]] = result.value
+        })
+
+        return next
+      })
+    })
+  }, [
+    shipbubbleCalculatedOptions.length,
+    appliedShippingOptionIdsKey,
+    cart.id,
+    shipbubbleQuotesMap,
+  ])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !cart.id) {
+      return
+    }
+
+    if (Object.keys(shipbubbleQuotesMap).length) {
+      window.localStorage.setItem(
+        `${SHIPBUBBLE_QUOTES_CACHE_PREFIX}${cart.id}`,
+        JSON.stringify(shipbubbleQuotesMap)
+      )
+      return
+    }
+
+    const raw = window.localStorage.getItem(
+      `${SHIPBUBBLE_QUOTES_CACHE_PREFIX}${cart.id}`
+    )
+    if (!raw) {
+      return
+    }
+
+    try {
+      const cached = JSON.parse(raw) as Record<string, ShipbubbleQuotesResponse>
+      if (cached && Object.keys(cached).length) {
+        setShipbubbleQuotesMap(cached)
+      }
+    } catch {
+      // Ignore malformed cache.
+    }
+  }, [cart.id, shipbubbleQuotesMap])
 
   const handleSubmit = () => {
     router.push(pathname + "?step=payment", { scroll: false })
   }
 
-  const handleSetShippingMethod = async (id: string | null) => {
-    if (!id) {
+  const handleSetShippingMethod = async (
+    sellerId: string,
+    selectedValue: string | null,
+    methods: StoreCardShippingMethod[]
+  ) => {
+    if (!selectedValue) {
       return
+    }
+
+    if (lastRequestValueBySellerRef.current[sellerId] === selectedValue) {
+      return
+    }
+
+    if (isSubmittingBySeller[sellerId]) {
+      return
+    }
+
+    if (selectedDeliveryValueMap[sellerId] === selectedValue) {
+      return
+    }
+
+    const [optionId, quoteId] = selectedValue.split("::")
+    const selectedMethod = methods.find((method) => method.id === optionId)
+
+    const payloadData: Record<string, unknown> = {}
+
+    if (selectedMethod && isShipbubbleOption(selectedMethod) && quoteId) {
+      const quotesPayload = shipbubbleQuotesMap[selectedMethod.id]
+      const selectedQuote = quotesPayload?.quotes?.find(
+        (quote) => quote.quote_id === quoteId
+      )
+
+      payloadData.shipbubble_quote_id = quoteId
+      payloadData.shipbubble_strategy = quotesPayload?.strategy || "best_value"
+
+      if (selectedQuote) {
+        payloadData.shipbubble_quote = {
+          quote_id: selectedQuote.quote_id,
+          courier_id: selectedQuote.courier_id,
+          carrier_code: selectedQuote.carrier_code,
+          service_code: selectedQuote.service_code,
+          service_name: selectedQuote.service_name,
+          amount: selectedQuote.amount,
+          request_token: selectedQuote.request_token,
+        }
+      }
     }
 
     try {
       setError(null)
       setIsLoadingPrices(true)
+      setIsSubmittingBySeller((prev) => ({ ...prev, [sellerId]: true }))
+      lastRequestValueBySellerRef.current[sellerId] = selectedValue
       const res = await setShippingMethod({
         cartId: cart.id,
-        shippingMethodId: id,
+        shippingMethodId: optionId,
+        data: Object.keys(payloadData).length ? payloadData : undefined,
       })
       if (!res.ok) {
         return setError(res.error?.message)
       }
+
+      setSelectedDeliveryValueMap((prev) => ({
+        ...prev,
+        [sellerId]: selectedValue,
+      }))
     } catch (error: any) {
       setError(
         error?.message?.replace("Error setting up the request: ", "") ||
@@ -146,36 +474,65 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
       )
     } finally {
       setIsLoadingPrices(false)
+      setIsSubmittingBySeller((prev) => ({ ...prev, [sellerId]: false }))
+      if (lastRequestValueBySellerRef.current[sellerId] === selectedValue) {
+        delete lastRequestValueBySellerRef.current[sellerId]
+      }
     }
   }
 
-  useEffect(() => {
-    setError(null)
-  }, [isOpen])
+  const groupedBySellerId = (shippingMethods || []).reduce(
+    (acc: Record<string, StoreCardShippingMethod[]>, method) => {
+      const sellerId = method.seller_id || "unknown-seller"
 
-  const groupedBySellerId = _shippingMethods?.reduce((acc: any, method) => {
-    const sellerId = method.seller_id!
+      if (!acc[sellerId]) {
+        acc[sellerId] = []
+      }
 
-    if (!acc[sellerId]) {
-      acc[sellerId] = []
+      // Keep method even when calculated price is pending/unavailable.
+      acc[sellerId].push(method)
+
+      return acc
+    },
+    {}
+  )
+
+  const effectiveGroupedBySellerId = useMemo(() => {
+    if (Object.keys(groupedBySellerId).length) {
+      return groupedBySellerId
     }
 
-    const amount = Number(
-      method.price_type === "flat"
-        ? method.amount
-        : calculatedPricesMap[method.id]
-    )
-
-    if (!isNaN(amount)) {
-      acc[sellerId]?.push(method)
+    const shipbubbleOptionIds = Object.keys(shipbubbleQuotesMap)
+    if (!shipbubbleOptionIds.length) {
+      return groupedBySellerId
     }
 
-    return acc
-  }, {})
+    const fallbackSellerId =
+      cart.items?.find((item) => item?.product?.seller?.id)?.product?.seller?.id ||
+      "unknown-seller"
+    const fallbackSellerName =
+      cart.items?.find((item) => item?.product?.seller?.name)?.product?.seller?.name ||
+      "Seller"
 
-  const handleEdit = () => {
-    router.replace(pathname + "?step=delivery")
-  }
+    return {
+      [fallbackSellerId]: shipbubbleOptionIds.map((optionId) => {
+        return {
+          id: optionId,
+          name: "ShipBubble Delivery",
+          provider_id: "shipbubble",
+          price_type: "calculated",
+          seller_id: fallbackSellerId,
+          seller_name: fallbackSellerName,
+          rules: [],
+        } as StoreCardShippingMethod
+      }),
+    }
+  }, [groupedBySellerId, shipbubbleQuotesMap, cart.items])
+
+  const groupedSellerEntries: [string, StoreCardShippingMethod[]][] =
+    Object.entries(effectiveGroupedBySellerId)
+      .map(([sellerId, methods]) => [sellerId, methods] as [string, StoreCardShippingMethod[]])
+      .filter(([, methods]) => methods.length > 0)
 
   const missingSellers = cart.items
     ?.filter((item) =>
@@ -183,7 +540,51 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
     )
     .map((item) => item.product?.seller?.name)
 
-  const isEditEnabled = !isOpen && !!cart?.shipping_methods?.length
+  const resolveSelectedDeliveryValue = (
+    sellerId: string,
+    deliveryOptions: DeliveryListOption[],
+    methods: StoreCardShippingMethod[]
+  ) => {
+    const localSelected = selectedDeliveryValueMap[sellerId]
+    if (
+      localSelected &&
+      deliveryOptions.some((option) => option.value === localSelected)
+    ) {
+      return localSelected
+    }
+
+    const appliedMethods = (cart.shipping_methods || []) as Array<
+      Record<string, unknown>
+    >
+    for (const applied of appliedMethods) {
+      const shippingOptionId =
+        String(
+          applied.shipping_option_id ||
+            (applied.shipping_option as Record<string, unknown> | undefined)?.id ||
+            ""
+        ) || ""
+
+      if (!shippingOptionId || !methods.some((method) => method.id === shippingOptionId)) {
+        continue
+      }
+
+      const appliedData = (applied.data || {}) as Record<string, unknown>
+      const quoteId =
+        typeof appliedData.shipbubble_quote_id === "string"
+          ? appliedData.shipbubble_quote_id
+          : undefined
+
+      const selectedValue = quoteId
+        ? `${shippingOptionId}::${quoteId}`
+        : shippingOptionId
+
+      if (deliveryOptions.some((option) => option.value === selectedValue)) {
+        return selectedValue
+      }
+    }
+
+    return undefined
+  }
 
   return (
     <div className="border p-4 rounded-sm bg-ui-bg-interactive">
@@ -219,155 +620,187 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
           level="h2"
           className="flex flex-row text-3xl-regular gap-x-2 items-baseline items-center"
         >
-          {!isOpen && (cart.shipping_methods?.length ?? 0) > 0 && (
+          {(cart.shipping_methods?.length ?? 0) > 0 && (
             <CheckCircleSolid />
           )}
           Delivery
         </Heading>
-        {isEditEnabled && (
-          <Text>
-            <Button onClick={handleEdit} variant="tonal">
-              Edit
-            </Button>
-          </Text>
-        )}
+        <Text />
       </div>
-      {isOpen ? (
-        <>
-          <div className="grid">
-            <div data-testid="delivery-options-container">
-              <div className="pb-8 md:pt-0 pt-2">
-                {Object.keys(groupedBySellerId).map((key) => {
-                  return (
-                    <div key={key} className="mb-4">
-                      <Heading level="h3" className="mb-2">
-                        {groupedBySellerId[key][0].seller_name}
-                      </Heading>
-                      <Listbox
-                        value={cart.shipping_methods?.[0]?.id}
-                        onChange={(value) => {
-                          handleSetShippingMethod(value)
-                        }}
-                      >
-                        <div className="relative">
-                          <Listbox.Button
-                            className={clsx(
-                              "relative w-full flex justify-between items-center px-4 h-12 bg-component-secondary text-left  cursor-default focus:outline-none border rounded-lg focus-visible:ring-2 focus-visible:ring-opacity-75 focus-visible:ring-white focus-visible:ring-offset-gray-300 focus-visible:ring-offset-2 focus-visible:border-gray-300 text-base-regular"
-                            )}
-                          >
-                            {({ open }) => (
-                              <>
-                                <span className="block truncate">
-                                  Choose delivery option
-                                </span>
-                                <ChevronUpDown
-                                  className={clx(
-                                    "transition-rotate duration-200",
-                                    {
-                                      "transform rotate-180": open,
-                                    }
-                                  )}
-                                />
-                              </>
-                            )}
-                          </Listbox.Button>
-                          <Transition
-                            as={Fragment}
-                            leave="transition ease-in duration-100"
-                            leaveFrom="opacity-100"
-                            leaveTo="opacity-0"
-                          >
-                            <Listbox.Options
-                              className="absolute z-20 w-full overflow-auto text-small-regular bg-white border rounded-lg border-top-0 max-h-60 focus:outline-none sm:text-sm"
-                              data-testid="shipping-address-options"
-                            >
-                              {groupedBySellerId[key].map((option: any) => {
-                                return (
-                                  <Listbox.Option
-                                    className="cursor-pointer select-none relative pl-6 pr-10 hover:bg-gray-50 py-4 border-b"
-                                    value={option.id}
-                                    key={option.id}
-                                  >
-                                    {option.name}
-                                    {" - "}
-                                    {option.price_type === "flat" ? (
-                                      convertToLocale({
-                                        amount: option.amount!,
-                                        currency_code: cart?.currency_code,
-                                      })
-                                    ) : calculatedPricesMap[option.id] ? (
-                                      convertToLocale({
-                                        amount: calculatedPricesMap[option.id],
-                                        currency_code: cart?.currency_code,
-                                      })
-                                    ) : isLoadingPrices ? (
-                                      <Loader />
-                                    ) : (
-                                      "-"
-                                    )}
-                                  </Listbox.Option>
-                                )
-                              })}
-                            </Listbox.Options>
-                          </Transition>
-                        </div>
-                      </Listbox>
-                    </div>
-                  )
-                })}
-                {cart && (cart.shipping_methods?.length ?? 0) > 0 && (
-                  <div className="flex flex-col">
-                    {cart.shipping_methods?.map((method) => (
-                      <CartShippingMethodRow
-                        key={method.id}
-                        method={method}
-                        currency_code={cart.currency_code}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <div>
-            <ErrorMessage
-              error={error}
-              data-testid="delivery-option-error-message"
-            />
-            <Button
-              onClick={handleSubmit}
-              variant="tonal"
-              disabled={!cart.shipping_methods?.[0]}
-              loading={isLoadingPrices}
-            >
-              Continue to payment
-            </Button>
-          </div>
-        </>
-      ) : (
-        <div>
-          <div className="text-small-regular">
-            {cart && (cart.shipping_methods?.length ?? 0) > 0 && (
-              <div className="flex flex-col">
-                {cart.shipping_methods?.map((method) => (
-                  <div key={method.id} className="mb-4 border rounded-md p-4">
-                    <Text className="txt-medium-plus text-ui-fg-base mb-1">
-                      Method
-                    </Text>
-                    <Text className="txt-medium text-ui-fg-subtle">
-                      {method.name}{" "}
-                      {convertToLocale({
-                        amount: method.amount!,
-                        currency_code: cart?.currency_code,
-                      })}
-                    </Text>
-                  </div>
-                ))}
+      <div className="grid">
+        <div data-testid="delivery-options-container">
+          <div className="pb-8 md:pt-0 pt-2">
+            {!groupedSellerEntries.length && (
+              <div className="border rounded-lg p-3 mb-4">
+                <Text className="txt-small text-ui-fg-subtle">
+                  No delivery options are loaded yet. Please refresh this page.
+                </Text>
               </div>
             )}
+            {groupedSellerEntries.map(([key, methods]) => {
+              if (!methods.length) {
+                return null
+              }
+
+              const firstMethod = methods[0]
+              const hasShipbubbleOption = methods.some((option) =>
+                isShipbubbleOption(option)
+              )
+              const deliveryOptions = methods.reduce(
+                (acc: DeliveryListOption[], option) => {
+                  if (
+                    isShipbubbleOption(option) &&
+                    shipbubbleQuotesMap[option.id]?.quotes?.length
+                  ) {
+                    const quotesPayload = shipbubbleQuotesMap[option.id]
+                    const quotes = quotesPayload.quotes || []
+
+                    quotes.forEach((quote) => {
+                      acc.push({
+                        value: `${option.id}::${quote.quote_id}`,
+                        optionId: option.id,
+                        name:
+                          quote.courier_name ||
+                          quote.service_name ||
+                          option.name ||
+                          "Delivery",
+                        amount: quote.amount,
+                        priceType: "calculated",
+                        quote,
+                        quoteId: quote.quote_id,
+                        recommended:
+                          quotesPayload.recommended_quote_id === quote.quote_id,
+                      })
+                    })
+
+                    return acc
+                  }
+
+                  if (!isShipbubbleOption(option)) {
+                    acc.push({
+                      value: option.id,
+                      optionId: option.id,
+                      name: option.name || "Delivery",
+                      amount: option.amount,
+                      priceType: option.price_type || "flat",
+                    })
+                  }
+
+                  return acc
+                },
+                []
+              )
+
+              const selectedValue = resolveSelectedDeliveryValue(
+                key,
+                deliveryOptions,
+                methods
+              )
+              const getDeliveryAmountLabel = (option: DeliveryListOption) => {
+                if (option.amount !== undefined) {
+                  return convertToLocale({
+                    amount: option.amount,
+                    currency_code: cart?.currency_code,
+                  })
+                }
+
+                const calculatedAmount = calculatedPricesMap[option.optionId]
+                if (calculatedAmount !== undefined) {
+                  return convertToLocale({
+                    amount: calculatedAmount,
+                    currency_code: cart?.currency_code,
+                  })
+                }
+
+                return isLoadingPrices ? "Loading..." : "-"
+              }
+
+              return (
+                <div key={key} className="mb-4">
+                  <Heading level="h3" className="mb-2">
+                    {firstMethod?.seller_name || "Seller"}
+                  </Heading>
+                  {!deliveryOptions.length ? (
+                    <div className="border rounded-lg p-3">
+                      <Text className="txt-small text-ui-fg-subtle">
+                        {hasShipbubbleOption
+                          ? "Live ShipBubble rates are unavailable. Please choose a manual shipping option for this seller."
+                          : "No delivery options available for this seller."}
+                      </Text>
+                    </div>
+                  ) : (
+                    <div
+                      className="border rounded-lg divide-y"
+                      data-testid="shipping-address-options"
+                    >
+                      {deliveryOptions.map((option) => {
+                        const etaLabel = getQuoteTimelineLabel(option.quote)
+
+                        return (
+                          <label
+                            key={option.value}
+                            className="flex items-start gap-3 p-3 cursor-pointer"
+                          >
+                            <input
+                              type="radio"
+                              name={`delivery-${key}`}
+                              value={option.value}
+                              checked={selectedValue === option.value}
+                              disabled={Boolean(isSubmittingBySeller[key])}
+                              onChange={() =>
+                                handleSetShippingMethod(
+                                  key,
+                                  option.value,
+                                  methods
+                                )
+                              }
+                              className="mt-1"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Text className="txt-compact-medium text-ui-fg-base">
+                                  {option.name}
+                                </Text>
+                                {option.recommended && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded bg-ui-tag-blue-bg text-ui-tag-blue-text">
+                                    Best value
+                                  </span>
+                                )}
+                              </div>
+                              <Text className="txt-small text-ui-fg-subtle">
+                                {getDeliveryAmountLabel(option)}
+                              </Text>
+                              {etaLabel && (
+                                <Text className="txt-small text-ui-fg-muted mt-1">
+                                  {etaLabel}
+                                </Text>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
-      )}
+      </div>
+      <div>
+        <ErrorMessage
+          error={error}
+          data-testid="delivery-option-error-message"
+        />
+        <Button
+          onClick={handleSubmit}
+          variant="tonal"
+          disabled={!cart.shipping_methods?.[0]}
+          loading={isLoadingPrices}
+        >
+          Continue to payment
+        </Button>
+      </div>
     </div>
   )
 }

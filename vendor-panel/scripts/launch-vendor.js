@@ -42,6 +42,9 @@ async function fetchPublishableKey() {
 
 async function launch() {
   console.log('🚀 Launching vendor panel...\n');
+
+  // Default vendor panel dev port.
+  process.env.PORT = process.env.PORT || '7001';
   
   // Fetch the publishable API key
   const apiKey = await fetchPublishableKey();
@@ -52,7 +55,7 @@ async function launch() {
   }
   
   // Run vite
-  console.log('Starting Vite dev server...\n');
+  console.log(`Starting Vite dev server on port ${process.env.PORT}...\n`);
   try {
     execSync('vite', { stdio: 'inherit', env: process.env });
   } catch (error) {

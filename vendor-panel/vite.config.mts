@@ -5,7 +5,7 @@ import inspect from "vite-plugin-inspect"
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd())
+  const env = loadEnv(mode, process.cwd(), "")
 
   const BASE = env.VITE_MEDUSA_BASE || "/"
   const BACKEND_URL = env.VITE_MEDUSA_BACKEND_URL || "http://localhost:9000"
@@ -22,6 +22,9 @@ export default defineConfig(({ mode }) => {
    */
   const MEDUSA_PROJECT = env.VITE_MEDUSA_PROJECT || null
   const sources = MEDUSA_PROJECT ? [MEDUSA_PROJECT] : []
+
+  const configuredPort = Number(env.PORT || env.VENDOR_PORT || 7001)
+  const port = Number.isFinite(configuredPort) ? configuredPort : 7001
 
   return {
     plugins: [
@@ -43,7 +46,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: true,
-      port: parseInt(process.env.PORT || '5173'),
+      port,
+      strictPort: true,
       open: false,
       allowedHosts: PUBLIC_BASE_URL ? [PUBLIC_BASE_URL.replace('https://', '').replace('http://', '').split('/')[0]] : [],
     },

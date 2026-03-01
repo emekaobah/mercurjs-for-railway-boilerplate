@@ -107,6 +107,65 @@ module.exports = defineConfig({
       }
     }] : []),
     {
+      resolve: '@medusajs/medusa/fulfillment',
+      options: {
+        providers: [
+          {
+            resolve: '@medusajs/medusa/fulfillment-manual',
+            id: 'manual',
+          },
+          {
+            resolve: './src/modules/shipbubble',
+            id: 'shipbubble',
+            options: {
+              enabled: process.env.SHIPBUBBLE_ENABLED || 'false',
+              api_base_url:
+                process.env.SHIPBUBBLE_API_BASE_URL ||
+                'https://api.shipbubble.com',
+              api_key: process.env.SHIPBUBBLE_API_KEY || '',
+              timeout_ms: process.env.SHIPBUBBLE_TIMEOUT_MS || '15000',
+              default_category_id:
+                process.env.SHIPBUBBLE_DEFAULT_CATEGORY_ID || '1',
+              default_sender_name:
+                process.env.SHIPBUBBLE_DEFAULT_SENDER_NAME || 'Store Sender',
+              default_sender_email:
+                process.env.SHIPBUBBLE_DEFAULT_SENDER_EMAIL || 'sender@example.com',
+              default_sender_phone:
+                process.env.SHIPBUBBLE_DEFAULT_SENDER_PHONE || '+2348000000000',
+              default_receiver_name:
+                process.env.SHIPBUBBLE_DEFAULT_RECEIVER_NAME || 'Checkout Customer',
+              default_receiver_email:
+                process.env.SHIPBUBBLE_DEFAULT_RECEIVER_EMAIL || 'customer@example.com',
+              default_receiver_phone:
+                process.env.SHIPBUBBLE_DEFAULT_RECEIVER_PHONE || '+2348000000000',
+              override_sender_address:
+                process.env.SHIPBUBBLE_OVERRIDE_SENDER_ADDRESS || '',
+              override_sender_latitude:
+                process.env.SHIPBUBBLE_OVERRIDE_SENDER_LATITUDE || '',
+              override_sender_longitude:
+                process.env.SHIPBUBBLE_OVERRIDE_SENDER_LONGITUDE || '',
+              override_receiver_address:
+                process.env.SHIPBUBBLE_OVERRIDE_RECEIVER_ADDRESS || '',
+              override_receiver_latitude:
+                process.env.SHIPBUBBLE_OVERRIDE_RECEIVER_LATITUDE || '',
+              override_receiver_longitude:
+                process.env.SHIPBUBBLE_OVERRIDE_RECEIVER_LONGITUDE || '',
+              default_weight_kg:
+                process.env.SHIPBUBBLE_DEFAULT_WEIGHT_KG || '1',
+              default_length_cm:
+                process.env.SHIPBUBBLE_DEFAULT_LENGTH_CM || '20',
+              default_width_cm:
+                process.env.SHIPBUBBLE_DEFAULT_WIDTH_CM || '20',
+              default_height_cm:
+                process.env.SHIPBUBBLE_DEFAULT_HEIGHT_CM || '10',
+              checkout_strategy:
+                process.env.SHIPBUBBLE_CHECKOUT_STRATEGY || 'best_value',
+            },
+          },
+        ],
+      },
+    },
+    {
       resolve: '@medusajs/medusa/notification',
       options: {
         providers: [
