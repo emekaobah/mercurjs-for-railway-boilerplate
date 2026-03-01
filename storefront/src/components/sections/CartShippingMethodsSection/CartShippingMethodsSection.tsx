@@ -285,6 +285,10 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
   }, [cart, shippingMethods])
 
   useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
     if (shippingMethods?.length) {
       const promises = shippingMethods
         .filter((sm) => sm.price_type === "calculated" && !isShipbubbleOption(sm))
@@ -305,10 +309,10 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
         setIsLoadingPrices(false)
       }
     }
-  }, [shippingMethods, cart.id])
+  }, [isOpen, shippingMethods, cart.id])
 
   useEffect(() => {
-    if (!shipbubbleCalculatedOptions.length) {
+    if (!isOpen || !shipbubbleCalculatedOptions.length) {
       return
     }
 
@@ -340,10 +344,14 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
         return next
       })
     })
-  }, [shipbubbleOptionsKey, cart.id])
+  }, [isOpen, shipbubbleOptionsKey, cart.id])
 
   useEffect(() => {
-    if (shipbubbleCalculatedOptions.length || !appliedShippingOptionIds.length) {
+    if (
+      !isOpen ||
+      shipbubbleCalculatedOptions.length ||
+      !appliedShippingOptionIds.length
+    ) {
       return
     }
 
@@ -376,6 +384,7 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
       })
     })
   }, [
+    isOpen,
     shipbubbleCalculatedOptions.length,
     appliedShippingOptionIdsKey,
     cart.id,
