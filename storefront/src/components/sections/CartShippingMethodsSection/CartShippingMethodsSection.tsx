@@ -13,7 +13,7 @@ import { convertToLocale } from "@/lib/helpers/money"
 import { CheckCircleSolid } from "@medusajs/icons"
 import { HttpTypes } from "@medusajs/types"
 import { Heading, Text } from "@medusajs/ui"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/atoms"
 
@@ -153,6 +153,15 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
 
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const isOpen = searchParams.get("step") === "delivery"
+  const isDeliveryComplete = (cart.shipping_methods?.length ?? 0) > 0
+
+  const handleEdit = () => {
+    router.push(pathname + "?step=delivery", { scroll: false })
+  }
+
   const lastRequestValueBySellerRef = useRef<Record<string, string>>({})
   const hasAutoSelectedBySellerRef = useRef<Record<string, boolean>>({})
 
@@ -407,7 +416,7 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
   // visually selected (e.g. because the stored quote_id from a previous session no longer
   // matches the fresh ephemeral IDs returned by the ShipBubble API).
   useEffect(() => {
-    if (!shipbubbleQuotesKey) {
+    if (!isOpen || !shipbubbleQuotesKey) {
       return
     }
 
@@ -686,218 +695,242 @@ const CartShippingMethodsSection: React.FC<ShippingProps> = ({
 
   return (
     <div className="border p-4 rounded-sm bg-ui-bg-interactive">
-      {/* {missingModal && (
-        <Modal
-          heading="Missing seller shipping option"
-          onClose={() => router.push(`/${pathname.split("/")[1]}/cart`)}
-        >
-          <div className="p-4">
-            <h2 className="heading-sm">
-              Some of the sellers in your cart do not have shipping options.
-            </h2>
-
-            <p className="text-md mt-3">
-              Please remove the{" "}
-              <span className="font-bold">
-                {missingSellers?.map(
-                  (seller, index) =>
-                    `${seller}${
-                      index === missingSellers.length - 1 ? " " : ", "
-                    }`
-                )}
-              </span>{" "}
-              items or contact{" "}
-              {missingSellers && missingSellers?.length > 1 ? "them" : "him"} to
-              get the shipping options.
-            </p>
-          </div>
-        </Modal>
-      )} */}
+      {/* Header — always visible */}
       <div className="flex flex-row items-center justify-between mb-6">
         <Heading
           level="h2"
           className="flex flex-row text-3xl-regular gap-x-2 items-baseline items-center"
         >
-          {(cart.shipping_methods?.length ?? 0) > 0 && (
-            <CheckCircleSolid />
-          )}
+          {!isOpen && isDeliveryComplete && <CheckCircleSolid />}
           Delivery
         </Heading>
-        <Text />
+        {!isOpen && isDeliveryComplete && (
+          <Text>
+            <Button onClick={handleEdit} variant="tonal">
+              Edit
+            </Button>
+          </Text>
+        )}
       </div>
-      <div className="grid">
-        <div data-testid="delivery-options-container">
-          <div className="pb-8 md:pt-0 pt-2">
-            {!groupedSellerEntries.length && (
-              <div className="border rounded-lg p-3 mb-4">
-                <Text className="txt-small text-ui-fg-subtle">
-                  No delivery options are loaded yet. Please refresh this page.
-                </Text>
-              </div>
-            )}
-            {groupedSellerEntries.map(([key, methods]) => {
-              if (!methods.length) {
-                return null
-              }
 
-              const firstMethod = methods[0]
-              const hasShipbubbleOption = methods.some((option) =>
-                isShipbubbleOption(option)
-              )
-              const deliveryOptions = methods.reduce(
-                (acc: DeliveryListOption[], option) => {
-                  if (
-                    isShipbubbleOption(option) &&
-                    shipbubbleQuotesMap[option.id]?.quotes?.length
-                  ) {
-                    const quotesPayload = shipbubbleQuotesMap[option.id]
-                    const quotes = quotesPayload.quotes || []
+      {/* ── Open state: full interactive options list ── */}
+      <div className={isOpen ? "block" : "hidden"}>
+        <div className="grid">
+          <div data-testid="delivery-options-container">
+            <div className="pb-8 md:pt-0 pt-2">
+              {!groupedSellerEntries.length && (
+                <div className="border rounded-lg p-3 mb-4">
+                  <Text className="txt-small text-ui-fg-subtle">
+                    No delivery options are loaded yet. Please refresh this page.
+                  </Text>
+                </div>
+              )}
+              {groupedSellerEntries.map(([key, methods]) => {
+                if (!methods.length) {
+                  return null
+                }
 
-                    quotes.forEach((quote) => {
-                      acc.push({
-                        value: `${option.id}::${quote.quote_id}`,
-                        optionId: option.id,
-                        name:
-                          quote.courier_name ||
-                          quote.service_name ||
-                          option.name ||
-                          "Delivery",
-                        amount: quote.amount,
-                        priceType: "calculated",
-                        quote,
-                        quoteId: quote.quote_id,
-                        recommended:
-                          quotesPayload.recommended_quote_id === quote.quote_id,
+                const firstMethod = methods[0]
+                const hasShipbubbleOption = methods.some((option) =>
+                  isShipbubbleOption(option)
+                )
+                const deliveryOptions = methods.reduce(
+                  (acc: DeliveryListOption[], option) => {
+                    if (
+                      isShipbubbleOption(option) &&
+                      shipbubbleQuotesMap[option.id]?.quotes?.length
+                    ) {
+                      const quotesPayload = shipbubbleQuotesMap[option.id]
+                      const quotes = quotesPayload.quotes || []
+
+                      quotes.forEach((quote) => {
+                        acc.push({
+                          value: `${option.id}::${quote.quote_id}`,
+                          optionId: option.id,
+                          name:
+                            quote.courier_name ||
+                            quote.service_name ||
+                            option.name ||
+                            "Delivery",
+                          amount: quote.amount,
+                          priceType: "calculated",
+                          quote,
+                          quoteId: quote.quote_id,
+                          recommended:
+                            quotesPayload.recommended_quote_id === quote.quote_id,
+                        })
                       })
-                    })
+
+                      return acc
+                    }
+
+                    if (!isShipbubbleOption(option)) {
+                      acc.push({
+                        value: option.id,
+                        optionId: option.id,
+                        name: option.name || "Delivery",
+                        amount: option.amount,
+                        priceType: option.price_type || "flat",
+                      })
+                    }
 
                     return acc
-                  }
+                  },
+                  []
+                )
 
-                  if (!isShipbubbleOption(option)) {
-                    acc.push({
-                      value: option.id,
-                      optionId: option.id,
-                      name: option.name || "Delivery",
+                const selectedValue = resolveSelectedDeliveryValue(
+                  key,
+                  deliveryOptions,
+                  methods
+                )
+                const getDeliveryAmountLabel = (option: DeliveryListOption) => {
+                  if (option.amount !== undefined) {
+                    return convertToLocale({
                       amount: option.amount,
-                      priceType: option.price_type || "flat",
+                      currency_code: cart?.currency_code,
                     })
                   }
 
-                  return acc
-                },
-                []
-              )
+                  const calculatedAmount = calculatedPricesMap[option.optionId]
+                  if (calculatedAmount !== undefined) {
+                    return convertToLocale({
+                      amount: calculatedAmount,
+                      currency_code: cart?.currency_code,
+                    })
+                  }
 
-              const selectedValue = resolveSelectedDeliveryValue(
-                key,
-                deliveryOptions,
-                methods
-              )
-              const getDeliveryAmountLabel = (option: DeliveryListOption) => {
-                if (option.amount !== undefined) {
-                  return convertToLocale({
-                    amount: option.amount,
-                    currency_code: cart?.currency_code,
-                  })
+                  return isLoadingPrices ? "Loading..." : "-"
                 }
 
-                const calculatedAmount = calculatedPricesMap[option.optionId]
-                if (calculatedAmount !== undefined) {
-                  return convertToLocale({
-                    amount: calculatedAmount,
-                    currency_code: cart?.currency_code,
-                  })
-                }
+                return (
+                  <div key={key} className="mb-4">
+                    <Heading level="h3" className="mb-2">
+                      {firstMethod?.seller_name || "Seller"}
+                    </Heading>
+                    {!deliveryOptions.length ? (
+                      <div className="border rounded-lg p-3">
+                        <Text className="txt-small text-ui-fg-subtle">
+                          {hasShipbubbleOption
+                            ? "Live ShipBubble rates are unavailable. Please choose a manual shipping option for this seller."
+                            : "No delivery options available for this seller."}
+                        </Text>
+                      </div>
+                    ) : (
+                      <div
+                        className="border rounded-lg divide-y"
+                        data-testid="shipping-address-options"
+                      >
+                        {deliveryOptions.map((option) => {
+                          const etaLabel = getQuoteTimelineLabel(option.quote)
 
-                return isLoadingPrices ? "Loading..." : "-"
-              }
-
-              return (
-                <div key={key} className="mb-4">
-                  <Heading level="h3" className="mb-2">
-                    {firstMethod?.seller_name || "Seller"}
-                  </Heading>
-                  {!deliveryOptions.length ? (
-                    <div className="border rounded-lg p-3">
-                      <Text className="txt-small text-ui-fg-subtle">
-                        {hasShipbubbleOption
-                          ? "Live ShipBubble rates are unavailable. Please choose a manual shipping option for this seller."
-                          : "No delivery options available for this seller."}
-                      </Text>
-                    </div>
-                  ) : (
-                    <div
-                      className="border rounded-lg divide-y"
-                      data-testid="shipping-address-options"
-                    >
-                      {deliveryOptions.map((option) => {
-                        const etaLabel = getQuoteTimelineLabel(option.quote)
-
-                        return (
-                          <label
-                            key={option.value}
-                            className="flex items-start gap-3 p-3 cursor-pointer"
-                          >
-                            <input
-                              type="radio"
-                              name={`delivery-${key}`}
-                              value={option.value}
-                              checked={selectedValue === option.value}
-                              disabled={Boolean(isSubmittingBySeller[key])}
-                              onChange={() =>
-                                handleSetShippingMethod(
-                                  key,
-                                  option.value,
-                                  methods
-                                )
-                              }
-                              className="mt-1"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <Text className="txt-compact-medium text-ui-fg-base">
-                                  {option.name}
+                          return (
+                            <label
+                              key={option.value}
+                              className="flex items-start gap-3 p-3 cursor-pointer"
+                            >
+                              <input
+                                type="radio"
+                                name={`delivery-${key}`}
+                                value={option.value}
+                                checked={selectedValue === option.value}
+                                disabled={Boolean(isSubmittingBySeller[key])}
+                                onChange={() =>
+                                  handleSetShippingMethod(
+                                    key,
+                                    option.value,
+                                    methods
+                                  )
+                                }
+                                className="mt-1"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Text className="txt-compact-medium text-ui-fg-base">
+                                    {option.name}
+                                  </Text>
+                                  {option.recommended && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded bg-ui-tag-blue-bg text-ui-tag-blue-text">
+                                      Best value
+                                    </span>
+                                  )}
+                                </div>
+                                <Text className="txt-small text-ui-fg-subtle">
+                                  {getDeliveryAmountLabel(option)}
                                 </Text>
-                                {option.recommended && (
-                                  <span className="text-[11px] px-2 py-0.5 rounded bg-ui-tag-blue-bg text-ui-tag-blue-text">
-                                    Best value
-                                  </span>
+                                {etaLabel && (
+                                  <Text className="txt-small text-ui-fg-muted mt-1">
+                                    {etaLabel}
+                                  </Text>
                                 )}
                               </div>
-                              <Text className="txt-small text-ui-fg-subtle">
-                                {getDeliveryAmountLabel(option)}
-                              </Text>
-                              {etaLabel && (
-                                <Text className="txt-small text-ui-fg-muted mt-1">
-                                  {etaLabel}
-                                </Text>
-                              )}
-                            </div>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
+        <div>
+          <ErrorMessage
+            error={error}
+            data-testid="delivery-option-error-message"
+          />
+          <Button
+            onClick={handleSubmit}
+            variant="tonal"
+            disabled={!cart.shipping_methods?.[0]}
+            loading={isLoadingPrices}
+          >
+            Continue to payment
+          </Button>
+        </div>
       </div>
-      <div>
-        <ErrorMessage
-          error={error}
-          data-testid="delivery-option-error-message"
-        />
-        <Button
-          onClick={handleSubmit}
-          variant="tonal"
-          disabled={!cart.shipping_methods?.[0]}
-          loading={isLoadingPrices}
-        >
-          Continue to payment
-        </Button>
+
+      {/* ── Closed + complete: summary of the chosen method(s) ── */}
+      <div className={!isOpen && isDeliveryComplete ? "block" : "hidden"}>
+        {((cart.shipping_methods || []) as Array<any>).map((method, index) => {
+          const courierName =
+            (method.data as any)?.shipbubble_quote?.service_name ||
+            (method.data as any)?.shipbubble_quote?.courier_name ||
+            method.name ||
+            "Delivery"
+          const priceLabel =
+            method.amount !== undefined
+              ? convertToLocale({
+                  amount: method.amount,
+                  currency_code: cart.currency_code,
+                })
+              : "-"
+
+          return (
+            <div
+              key={method.id ?? index}
+              className="flex items-start gap-x-1 w-full"
+            >
+              <div className="flex flex-col w-1/3">
+                <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                  Delivery method
+                </Text>
+                <Text className="txt-medium text-ui-fg-subtle">
+                  {courierName}
+                </Text>
+              </div>
+              <div className="flex flex-col w-1/3">
+                <Text className="txt-medium-plus text-ui-fg-base mb-1">
+                  Delivery cost
+                </Text>
+                <Text className="txt-medium text-ui-fg-subtle">
+                  {priceLabel}
+                </Text>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
