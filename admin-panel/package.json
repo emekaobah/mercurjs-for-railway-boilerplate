@@ -1,6 +1,7 @@
 {
   "name": "@medusajs/dashboard",
   "version": "2.10.3",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "generate:static": "node ./scripts/generate-currencies.js && prettier --write ./src/lib/currencies.ts",
     "dev": "vite --port 5173 --strictPort",

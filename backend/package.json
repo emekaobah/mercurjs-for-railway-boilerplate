@@ -1,6 +1,7 @@
 {
   "name": "medusa-starter-default",
   "version": "0.0.1",
+  "packageManager": "pnpm@9.15.9",
   "description": "A starter for Medusa projects.",
   "author": "Medusa (https://medusajs.com)",
   "license": "MIT",
