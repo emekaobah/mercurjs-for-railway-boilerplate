@@ -16,6 +16,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.1",
     "@hookform/resolvers": "^3.10.0",
+    "@medusajs/icons": "2.11.3",
     "@medusajs/js-sdk": "^2.2.0",
     "@medusajs/ui": "^4.0.7",
     "@stripe/react-stripe-js": "^3.7.0",
