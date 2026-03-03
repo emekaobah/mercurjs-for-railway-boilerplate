@@ -19,6 +19,10 @@ import { productsToInsert } from './seed/seed-products'
 
 const NIGERIA = 'ng'
 
+type SellerService = {
+  listSellers: (filters: { name: string }) => Promise<Array<{ id: string }>>
+}
+
 const EBEANO_VENDORS = [
   {
     email: 'vendor@ebeanolekki.com',
@@ -92,7 +96,7 @@ export default async function seedEbeanoVendors({ container }: ExecArgs) {
   const link = container.resolve(ContainerRegistrationKeys.LINK)
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const authService = container.resolve(Modules.AUTH)
-  const sellerService = container.resolve(SELLER_MODULE)
+  const sellerService = container.resolve(SELLER_MODULE) as SellerService
   const productService = container.resolve(Modules.PRODUCT)
   const inventoryService = container.resolve(Modules.INVENTORY)
   const regionService = container.resolve(Modules.REGION)
