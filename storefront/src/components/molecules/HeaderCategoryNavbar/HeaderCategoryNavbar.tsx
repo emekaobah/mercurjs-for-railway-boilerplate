@@ -13,6 +13,13 @@ export const HeaderCategoryNavbar = ({
 }) => {
   return (
     <nav className="flex items-center flex-col p-1 gap-1">
+      <LocalizedClientLink
+        href="/sellers"
+        onClick={() => (onClose ? onClose(false) : null)}
+        className={cn("label-md uppercase w-full")}
+      >
+        <Button className="w-full rounded-sm">Sellers</Button>
+      </LocalizedClientLink>
       {categories?.map(({ id, handle, name }) => (
         <LocalizedClientLink
           key={id}

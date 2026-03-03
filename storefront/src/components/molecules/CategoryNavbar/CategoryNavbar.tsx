@@ -2,7 +2,7 @@
 import { HttpTypes } from "@medusajs/types"
 import LocalizedClientLink from "@/components/molecules/LocalizedLink/LocalizedLink"
 import { cn } from "@/lib/utils"
-import { useParams } from "next/navigation"
+import { useParams, usePathname } from "next/navigation"
 import { CollapseIcon } from "@/icons"
 
 export const CategoryNavbar = ({
@@ -13,6 +13,7 @@ export const CategoryNavbar = ({
   onClose?: (state: boolean) => void
 }) => {
   const { category } = useParams()
+  const pathname = usePathname()
 
   return (
     <nav className="flex md:items-center flex-col md:flex-row">
@@ -24,6 +25,16 @@ export const CategoryNavbar = ({
         )}
       >
         All Products
+      </LocalizedClientLink>
+      <LocalizedClientLink
+        href="/sellers"
+        onClick={() => (onClose ? onClose(false) : null)}
+        className={cn(
+          "label-md uppercase px-4 my-3 md:my-0 flex items-center justify-between",
+          pathname.includes("/sellers") && "md:border-b md:border-primary"
+        )}
+      >
+        Sellers
       </LocalizedClientLink>
       {categories?.map(({ id, handle, name }) => (
         <LocalizedClientLink
