@@ -19,7 +19,7 @@ export const HomeProductsCarousel = async ({
   } = await listProducts({
     countryCode: locale,
     queryParams: {
-      limit: home ? 4 : undefined,
+      limit: home ? 8 : undefined,
       order: "created_at",
       handle: home
         ? undefined
@@ -34,11 +34,15 @@ export const HomeProductsCarousel = async ({
     <div className="flex justify-center w-full">
       <Carousel
         align="start"
+        showDesktopArrows={home}
+        desktopArrowBackground={home ? "circle" : "none"}
+        showDesktopIndicator={home}
         items={(sellerProducts.length ? sellerProducts : products).map(
           (product) => (
             <ProductCard
               key={product.id}
               product={product}
+              compact={home}
               api_product={
                 home
                   ? (product as HttpTypes.StoreProduct)

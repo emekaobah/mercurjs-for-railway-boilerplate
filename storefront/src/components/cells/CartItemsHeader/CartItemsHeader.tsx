@@ -16,7 +16,7 @@ export const CartItemsHeader = ({
 
         <div className="lg:flex gap-2">
           <p className="uppercase heading-xs">{seller.name}</p>
-          {seller.id !== "fleek" && (
+          {seller.id !== "trollee" && (
             <div className="flex items-center gap-2">
               <Divider square />
               <p className="label-md text-secondary">

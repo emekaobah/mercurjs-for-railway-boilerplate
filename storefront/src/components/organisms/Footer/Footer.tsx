@@ -2,9 +2,11 @@ import LocalizedClientLink from "@/components/molecules/LocalizedLink/LocalizedL
 import footerLinks from "@/data/footerLinks"
 
 export function Footer() {
+  const currentYear = new Date().getFullYear()
+
   return (
     <footer className="bg-primary container">
-      <div className="grid grid-cols-1 lg:grid-cols-3">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Customer Services Column */}
         <div className="p-6 border rounded-sm">
           <h2 className="heading-sm text-primary mb-3 uppercase">
@@ -61,7 +63,9 @@ export function Footer() {
       </div>
 
       <div className="py-6 border rounded-sm ">
-        <p className="text-md text-secondary text-center ">© 2024 Fleek</p>
+        <p className="text-md text-secondary text-center ">
+          © {currentYear} TROLLEE
+        </p>
       </div>
     </footer>
   )

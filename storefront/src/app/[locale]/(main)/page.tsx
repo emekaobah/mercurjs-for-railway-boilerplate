@@ -1,10 +1,11 @@
 import {
   BannerSection,
-  BlogSection,
+  // BlogSection,
   Hero,
   HomeCategories,
   HomeProductSection,
-  ShopByStyleSection,
+  HomeStores,
+  // ShopByStyleSection,
 } from "@/components/sections"
 
 import type { Metadata } from "next"
@@ -162,18 +163,19 @@ export default async function Home({
 
       <Hero
         image="/images/hero/Image.jpg"
-        heading="Snag your style in a flash"
+        heading="SHOP YOUR FAVOURITE STORES"
         paragraph="Buy, sell, and discover pre-loved gems from the trendiest brands."
         buttons={[
-          { label: "Buy now", path: "/categories" },
+          { label: "Explore stores", path: "/sellers" },
           {
-            label: "Sell now",
-            path:
-              process.env.NEXT_PUBLIC_VENDOR_URL ||
-              "https://vendor.mercurjs.com",
+            label: "Shop products",
+            path: "/categories",
           },
         ]}
       />
+      <div className="px-4 lg:px-8 w-full">
+        <HomeStores heading="SHOP BY STORE" />
+      </div>
       <div className="px-4 lg:px-8 w-full">
         <HomeProductSection heading="trending listings" locale={locale} home />
       </div>
@@ -181,8 +183,8 @@ export default async function Home({
         <HomeCategories heading="SHOP BY CATEGORY" />
       </div>
       <BannerSection />
-      <ShopByStyleSection />
-      <BlogSection />
+      {/* <ShopByStyleSection /> */}
+      {/* <BlogSection /> */}
     </main>
   )
 }

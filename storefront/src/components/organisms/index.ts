@@ -25,6 +25,7 @@ import { Addresses } from "./Addressess/Addresses"
 import { ReviewsToWrite } from "./Reviews/ReviewsToWrite"
 import { ReviewsWritten } from "./Reviews/ReviewsWritten"
 import { CartEmpty } from "./CartEmpty/CartEmpty"
+import { StoreCard } from "./StoreCard/StoreCard"
 
 export {
   ProductCard,
@@ -54,4 +55,5 @@ export {
   ReviewsToWrite,
   ReviewsWritten,
   CartEmpty,
+  StoreCard,
 }

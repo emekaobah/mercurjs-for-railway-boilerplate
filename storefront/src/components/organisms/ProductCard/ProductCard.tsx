@@ -11,9 +11,11 @@ import { getProductPrice } from "@/lib/helpers/get-product-price"
 export const ProductCard = ({
   product,
   api_product,
+  compact = false,
 }: {
   product: Hit<HttpTypes.StoreProduct> | Partial<Hit<BaseHit>>
   api_product?: HttpTypes.StoreProduct | null
+  compact?: boolean
 }) => {
   if (!api_product) {
     return null
@@ -28,7 +30,10 @@ export const ProductCard = ({
   return (
     <div
       className={clsx(
-        "relative group border rounded-sm flex flex-col justify-between p-1 w-full lg:w-[calc(25%-1rem)] min-w-[250px]"
+        "relative group border rounded-sm flex flex-col justify-between p-1",
+        compact
+          ? "w-[233px] min-w-[233px]"
+          : "w-full lg:w-[calc(25%-1rem)] min-w-[250px]"
       )}
     >
       <div className="relative w-full h-full bg-primary aspect-square">

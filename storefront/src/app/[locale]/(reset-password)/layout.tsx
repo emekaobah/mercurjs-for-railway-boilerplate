@@ -16,7 +16,7 @@ export default function ResetPasswordLayout({
                 src="/Logo.svg"
                 width={126}
                 height={40}
-                alt="Logo"
+                alt="TROLLEE logo"
                 priority
               />
             </LocalizedClientLink>
