@@ -243,7 +243,7 @@ export default async function seedEbeanoVendors({ container }: ExecArgs) {
         filters: { id: stockLocation.id }
       })
 
-      const fulfillmentSetId = updatedLocation.fulfillment_sets[0]?.id
+      const fulfillmentSetId = updatedLocation?.fulfillment_sets?.[0]?.id
       if (!fulfillmentSetId) {
         logger.warn(`  No fulfillment set found for ${vendor.storeName}, skipping shipping setup.`)
       } else {
