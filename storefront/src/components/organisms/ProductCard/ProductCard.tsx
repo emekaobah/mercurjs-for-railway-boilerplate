@@ -26,6 +26,17 @@ export const ProductCard = ({
   })
 
   const productName = String(product.title || "Product")
+  const sellerName =
+    (
+      api_product as HttpTypes.StoreProduct & {
+        seller?: { name?: string | null }
+      }
+    )?.seller?.name ||
+    (
+      product as {
+        seller?: { name?: string | null }
+      }
+    )?.seller?.name
 
   return (
     <div
@@ -85,6 +96,11 @@ export const ProductCard = ({
         <div className="flex justify-between p-4">
           <div className="w-full">
             <h3 className="heading-sm truncate">{product.title}</h3>
+            {sellerName ? (
+              <p className="label-sm text-gray-500 truncate mt-1">
+                Store: {sellerName}
+              </p>
+            ) : null}
             <div className="flex items-center gap-2 mt-2">
               <p className="font-medium">{cheapestPrice?.calculated_price}</p>
               {cheapestPrice?.calculated_price !==

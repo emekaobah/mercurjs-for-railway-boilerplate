@@ -85,7 +85,7 @@ const ProductsListing = ({
         countryCode: locale,
         queryParams: {
           fields:
-            "*variants.calculated_price,*seller.reviews,-thumbnail,-images,-type,-tags,-variants.options,-options,-collection,-collection_id",
+            "*variants.calculated_price,*seller,*seller.reviews,-thumbnail,-images,-type,-tags,-variants.options,-options,-collection,-collection_id",
           handle: items.map((item) => item.handle),
           limit: items.length,
         },

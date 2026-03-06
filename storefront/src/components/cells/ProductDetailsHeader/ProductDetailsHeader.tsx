@@ -13,6 +13,7 @@ import { WishlistButton } from "../WishlistButton/WishlistButton"
 import { Wishlist } from "@/types/wishlist"
 import { toast } from "@/lib/helpers/toast"
 import { useCartContext } from "@/components/providers"
+import LocalizedClientLink from "@/components/molecules/LocalizedLink/LocalizedLink"
 
 const optionsAsKeymap = (
   variantOptions: HttpTypes.StoreProductVariant["options"]
@@ -135,6 +136,20 @@ export const ProductDetailsHeader = ({
             {/* {product?.brand || "No brand"} */}
           </h2>
           <h1 className="heading-lg text-primary">{product.title}</h1>
+          {product.seller?.name ? (
+            <div className="mt-1">
+              {product.seller.handle ? (
+                <LocalizedClientLink
+                  href={`/sellers/${product.seller.handle}`}
+                  className="label-md text-secondary underline underline-offset-2 hover:text-primary transition-colors"
+                >
+                  Store: {product.seller.name}
+                </LocalizedClientLink>
+              ) : (
+                <p className="label-md text-secondary">Store: {product.seller.name}</p>
+              )}
+            </div>
+          ) : null}
           <div className="mt-2 flex gap-2 items-center">
             {hasAnyPrice && variantPrice ? (
               <>

@@ -43,7 +43,7 @@ const ProductsListing = ({ locale }: { locale: string }) => {
       queryParams: {
         limit: 99999,
         fields:
-          "*variants.calculated_price,*seller.reviews,-thumbnail,-images,-type,-tags,-variants.options,-options,-collection,-collection_id",
+          "*variants.calculated_price,*seller,*seller.reviews,-thumbnail,-images,-type,-tags,-variants.options,-options,-collection,-collection_id",
       },
     }).then(({ response }) => {
       setProd(response.products)
