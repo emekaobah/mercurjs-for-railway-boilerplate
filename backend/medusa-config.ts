@@ -3,6 +3,56 @@ import { defineConfig, loadEnv } from '@medusajs/framework/utils'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
+const stripePaymentProvider =
+  process.env.STRIPE_SECRET_API_KEY && process.env.STRIPE_WEBHOOK_SECRET
+    ? [
+        {
+          resolve:
+            '@mercurjs/payment-stripe-connect/providers/stripe-connect',
+          id: 'stripe-connect',
+          options: {
+            apiKey: process.env.STRIPE_SECRET_API_KEY,
+            webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+          },
+        },
+      ]
+    : []
+
+const virtualPayChannelCode =
+  process.env.VIRTUALPAY_CHANNELCODE || process.env.VIRTUALPAY_CHANNEL_CODE
+
+const virtualPayProvider =
+  process.env.VIRTUALPAY_SECRET_KEY &&
+  process.env.VIRTUALPAY_MERCHANT_ID &&
+  virtualPayChannelCode
+    ? [
+        {
+          resolve: './src/modules/payment-providers/virtualpay-retail',
+          id: 'retail',
+          options: {
+            baseUrl:
+              process.env.VIRTUALPAY_BASE_URL ||
+              'https://developer-sandbox.accessbankplc.com/virtualpay',
+            secretKey: process.env.VIRTUALPAY_SECRET_KEY,
+            merchantId: process.env.VIRTUALPAY_MERCHANT_ID,
+            channelCode: virtualPayChannelCode,
+            requestAuthorizer: process.env.VIRTUALPAY_REQUEST_AUTHORIZER || '',
+            timeoutMs: process.env.VIRTUALPAY_TIMEOUT_MS || '15000',
+            accountDetailsEndpoint:
+              process.env.ACCOUNT_DETAILS_ENDPOINT ||
+              'https://api-sandbox.accessbankplc.com/AccessBankEnquiryServices/GetAccountDetails',
+            accountDetailsChannelCode:
+              process.env.ACCOUNT_DETAILS_CHANNEL_CODE || virtualPayChannelCode,
+            accountDetailsAuthKey:
+              process.env.ACCOUNT_DETAILS_AUTH_KEY ||
+              process.env.VIRTUALPAY_SECRET_KEY,
+          },
+        },
+      ]
+    : []
+
+const paymentProviders = [...stripePaymentProvider, ...virtualPayProvider]
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -90,20 +140,10 @@ module.exports = defineConfig({
         }
       }
     ] : []),
-    ...(process.env.STRIPE_SECRET_API_KEY && process.env.STRIPE_WEBHOOK_SECRET ? [{
+    ...(paymentProviders.length ? [{
       resolve: '@medusajs/medusa/payment',
       options: {
-        providers: [
-          {
-            resolve:
-              '@mercurjs/payment-stripe-connect/providers/stripe-connect',
-            id: 'stripe-connect',
-            options: {
-              apiKey: process.env.STRIPE_SECRET_API_KEY,
-              webhookSecret: process.env.STRIPE_WEBHOOK_SECRET
-            }
-          }
-        ]
+        providers: paymentProviders
       }
     }] : []),
     {

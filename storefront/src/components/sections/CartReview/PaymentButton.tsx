@@ -1,7 +1,7 @@
 "use client"
 
 import ErrorMessage from "@/components/molecules/ErrorMessage/ErrorMessage"
-import { isManual, isStripe } from "../../../lib/constants"
+import { isManual, isStripe, isVirtualPay } from "../../../lib/constants"
 import { placeOrder } from "@/lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { useElements, useStripe } from "@stripe/react-stripe-js"
@@ -15,6 +15,10 @@ type PaymentButtonProps = {
   "data-testid": string
 }
 
+type StorePaymentSession = NonNullable<
+  HttpTypes.StoreCart["payment_collection"]
+>["payment_sessions"][number]
+
 const PaymentButton: React.FC<PaymentButtonProps> = ({
   cart,
   "data-testid": dataTestId,
@@ -26,12 +30,27 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     !cart.email ||
     (cart.shipping_methods?.length ?? 0) < 1
 
-  const paymentSession = cart.payment_collection?.payment_sessions?.[0]
+  const paymentSessions = cart.payment_collection?.payment_sessions || []
+  const paymentSession =
+    paymentSessions.find((session) =>
+      ["pending", "authorized", "captured", "requires_more"].includes(
+        session.status
+      )
+    ) || paymentSessions[0]
 
   switch (true) {
     case isStripe(paymentSession?.provider_id):
       return (
         <StripePaymentButton
+          notReady={notReady}
+          cart={cart}
+          paymentSession={paymentSession}
+          data-testid={dataTestId}
+        />
+      )
+    case isVirtualPay(paymentSession?.provider_id):
+      return (
+        <VirtualPayPaymentButton
           notReady={notReady}
           cart={cart}
           data-testid={dataTestId}
@@ -162,6 +181,78 @@ const StripePaymentButton = ({
       <ErrorMessage
         error={errorMessage}
         data-testid="stripe-payment-error-message"
+      />
+    </>
+  )
+}
+
+const VirtualPayPaymentButton = ({
+  cart,
+  paymentSession,
+  notReady,
+}: {
+  cart: HttpTypes.StoreCart
+  paymentSession?: StorePaymentSession
+  notReady: boolean
+}) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const accountNumber =
+    (paymentSession?.data as Record<string, unknown> | undefined)
+      ?.virtual_acct_no ||
+    (paymentSession?.data as Record<string, unknown> | undefined)
+      ?.virtual_account_no
+  const accountName =
+    (paymentSession?.data as Record<string, unknown> | undefined)
+      ?.virtual_acct_name ||
+    (paymentSession?.data as Record<string, unknown> | undefined)
+      ?.virtual_account_name
+  const expiry =
+    (paymentSession?.data as Record<string, unknown> | undefined)
+      ?.expiry_datetime ||
+    (paymentSession?.data as Record<string, unknown> | undefined)?.expiry_date
+
+  const handlePayment = async () => {
+    setSubmitting(true)
+    try {
+      const res = await placeOrder()
+      if (!res.ok) {
+        setErrorMessage(res.error?.message)
+      }
+    } catch (error: any) {
+      if (error?.message !== "NEXT_REDIRECT") {
+        setErrorMessage(
+          error?.message?.replace("Error setting up the request: ", "")
+        )
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-3 rounded border border-ui-border-base p-3 text-sm text-ui-fg-subtle">
+        <p className="font-medium text-ui-fg-base mb-1">
+          Pay using the generated virtual account, then place your order.
+        </p>
+        {accountNumber && (
+          <p data-testid="virtualpay-account-number">Account: {String(accountNumber)}</p>
+        )}
+        {accountName && <p>Account name: {String(accountName)}</p>}
+        {expiry && <p>Expires: {String(expiry)}</p>}
+      </div>
+      <Button
+        disabled={notReady}
+        onClick={handlePayment}
+        className="w-full"
+        loading={submitting}
+      >
+        I&apos;ve paid, place order
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="virtualpay-payment-error-message"
       />
     </>
   )

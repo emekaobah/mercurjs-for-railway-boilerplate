@@ -1,4 +1,4 @@
-import { isStripe, paymentInfoMap } from "@/lib/constants"
+import { getPaymentProviderTitle } from "@/lib/constants"
 import { convertToLocale } from "@/lib/helpers/money"
 import { HttpTypes } from "@medusajs/types"
 import { Container, Text } from "@medusajs/ui"
@@ -69,7 +69,7 @@ const OrderShipping = ({ order }: ShippingDetailsProps) => {
                   className="txt-medium text-ui-fg-subtle"
                   data-testid="payment-method"
                 >
-                  {paymentInfoMap[payment.provider_id].title}
+                  {getPaymentProviderTitle(payment.provider_id)}
                 </Text>
               </div>
             </div>

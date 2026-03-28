@@ -33,6 +33,24 @@ import { productsToInsert } from './seed-products'
 
 const countries = ['be', 'de', 'dk', 'se', 'fr', 'es', 'it', 'pl', 'cz', 'nl']
 
+const buildRegionPaymentProviders = (): string[] => {
+  const providers = ['pp_system_default']
+
+  if (
+    process.env.VIRTUALPAY_SECRET_KEY &&
+    process.env.VIRTUALPAY_MERCHANT_ID &&
+    (process.env.VIRTUALPAY_CHANNELCODE || process.env.VIRTUALPAY_CHANNEL_CODE)
+  ) {
+    providers.push('pp_virtualpay_retail')
+  }
+
+  if (process.env.STRIPE_SECRET_API_KEY && process.env.STRIPE_WEBHOOK_SECRET) {
+    providers.push('pp_card_stripe-connect')
+  }
+
+  return [...new Set(providers)]
+}
+
 export async function createSalesChannel(container: MedusaContainer) {
   const salesChannelModuleService = container.resolve(Modules.SALES_CHANNEL)
   let [defaultSalesChannel] = await salesChannelModuleService.listSalesChannels(
@@ -82,6 +100,8 @@ export async function createStore(
   })
 }
 export async function createRegions(container: MedusaContainer) {
+  const paymentProviders = buildRegionPaymentProviders()
+
   const {
     result: [region]
   } = await createRegionsWorkflow(container).run({
@@ -91,7 +111,7 @@ export async function createRegions(container: MedusaContainer) {
           name: 'Europe',
           currency_code: 'eur',
           countries,
-          payment_providers: ['pp_system_default']
+          payment_providers: paymentProviders
         }
       ]
     }

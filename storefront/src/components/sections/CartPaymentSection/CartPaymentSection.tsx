@@ -4,7 +4,9 @@ import ErrorMessage from "@/components/molecules/ErrorMessage/ErrorMessage"
 import { initiatePaymentSession } from "@/lib/data/cart"
 import { RadioGroup } from "@headlessui/react"
 import {
+  getPaymentProviderTitle,
   isStripe as isStripeFunc,
+  isVirtualPay,
   paymentInfoMap,
 } from "../../../lib/constants"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
@@ -32,7 +34,10 @@ const CartPaymentSection = ({
   availablePaymentMethods: StoreCardPaymentMethod[] | null
 }) => {
   const activeSession = cart.payment_collection?.payment_sessions?.find(
-    (paymentSession: any) => paymentSession.status === "pending"
+    (paymentSession: any) =>
+      ["pending", "authorized", "captured", "requires_more"].includes(
+        paymentSession.status
+      )
   )
 
   const [isLoading, setIsLoading] = useState(false)
@@ -66,6 +71,21 @@ const CartPaymentSection = ({
 
   const paymentReady =
     (activeSession && cart?.shipping_methods.length !== 0) || paidByGiftcard
+
+  const virtualAccountNumber =
+    activeSession && isVirtualPay(activeSession.provider_id)
+      ? activeSession?.data?.virtual_acct_no ||
+        activeSession?.data?.virtual_account_no
+      : null
+  const virtualAccountName =
+    activeSession && isVirtualPay(activeSession.provider_id)
+      ? activeSession?.data?.virtual_acct_name ||
+        activeSession?.data?.virtual_account_name
+      : null
+  const virtualExpiry =
+    activeSession && isVirtualPay(activeSession.provider_id)
+      ? activeSession?.data?.expiry_datetime || activeSession?.data?.expiry_date
+      : null
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -211,15 +231,14 @@ const CartPaymentSection = ({
                 <Text className="txt-medium-plus text-ui-fg-base mb-1">
                   Payment method
                 </Text>
-                <Text
-                  className="txt-medium text-ui-fg-subtle"
-                  data-testid="payment-method-summary"
-                >
-                  {paymentInfoMap[activeSession?.provider_id]?.title ||
-                    activeSession?.provider_id}
-                </Text>
-              </div>
-              <div className="flex flex-col w-1/3">
+                  <Text
+                    className="txt-medium text-ui-fg-subtle"
+                    data-testid="payment-method-summary"
+                  >
+                    {getPaymentProviderTitle(activeSession?.provider_id)}
+                  </Text>
+                </div>
+                <div className="flex flex-col w-1/3">
                 <Text className="txt-medium-plus text-ui-fg-base mb-1">
                   Payment details
                 </Text>
@@ -233,10 +252,24 @@ const CartPaymentSection = ({
                     )}
                   </Container>
                   <Text>
-                    {isStripeFunc(selectedPaymentMethod) && cardBrand
+                    {isVirtualPay(activeSession?.provider_id) &&
+                    virtualAccountNumber
+                      ? `Acct ${virtualAccountNumber}`
+                      : isStripeFunc(selectedPaymentMethod) && cardBrand
                       ? cardBrand
                       : "Another step will appear"}
                   </Text>
+                  {isVirtualPay(activeSession?.provider_id) &&
+                    virtualAccountName && (
+                      <Text className="txt-small text-ui-fg-muted mt-1">
+                        {virtualAccountName}
+                      </Text>
+                    )}
+                  {isVirtualPay(activeSession?.provider_id) && virtualExpiry && (
+                    <Text className="txt-small text-ui-fg-muted mt-1">
+                      Expires: {String(virtualExpiry)}
+                    </Text>
+                  )}
                 </div>
               </div>
             </div>

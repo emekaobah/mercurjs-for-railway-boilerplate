@@ -20,6 +20,24 @@ import {
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows";
 
+const buildRegionPaymentProviders = (): string[] => {
+  const providers = ["pp_system_default"];
+
+  if (
+    process.env.VIRTUALPAY_SECRET_KEY &&
+    process.env.VIRTUALPAY_MERCHANT_ID &&
+    (process.env.VIRTUALPAY_CHANNELCODE || process.env.VIRTUALPAY_CHANNEL_CODE)
+  ) {
+    providers.push("pp_virtualpay_retail");
+  }
+
+  if (process.env.STRIPE_SECRET_API_KEY && process.env.STRIPE_WEBHOOK_SECRET) {
+    providers.push("pp_card_stripe-connect");
+  }
+
+  return [...new Set(providers)];
+};
+
 export default async function seedDemoData({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const link = container.resolve(ContainerRegistrationKeys.LINK);
@@ -29,6 +47,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
   const storeModuleService = container.resolve(Modules.STORE);
 
   const countries = ["us", "ca", "gb", "de", "fr", "es", "it"];
+  const paymentProviders = buildRegionPaymentProviders();
 
   logger.info("Seeding store data...");
   const [store] = await storeModuleService.listStores();
@@ -76,13 +95,13 @@ export default async function seedDemoData({ container }: ExecArgs) {
           name: "North America",
           currency_code: "usd",
           countries: ["us", "ca"],
-          payment_providers: ["pp_system_default"],
+          payment_providers: paymentProviders,
         },
         {
           name: "Europe",
           currency_code: "eur",
           countries: ["gb", "de", "fr", "es", "it"],
-          payment_providers: ["pp_system_default"],
+          payment_providers: paymentProviders,
         },
       ],
     },

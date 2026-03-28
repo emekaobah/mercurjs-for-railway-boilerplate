@@ -30,6 +30,10 @@ export const paymentInfoMap: Record<
     title: "Manual Payment",
     icon: <Cash />,
   },
+  pp_virtualpay_retail: {
+    title: "VirtualPay Transfer",
+    icon: <Cash />,
+  },
   // Add more payment providers here
 }
 
@@ -42,6 +46,28 @@ export const isPaypal = (providerId?: string) => {
 }
 export const isManual = (providerId?: string) => {
   return providerId?.startsWith("pp_system_default")
+}
+export const isVirtualPay = (providerId?: string) => {
+  return providerId?.startsWith("pp_virtualpay_")
+}
+export const isAsyncPaymentProvider = (providerId?: string) => {
+  return isVirtualPay(providerId)
+}
+export const getPaymentProviderTitle = (providerId?: string) => {
+  if (!providerId) {
+    return "Payment"
+  }
+
+  const mapped = paymentInfoMap[providerId]?.title
+  if (mapped) {
+    return mapped
+  }
+
+  const id = providerId.toLowerCase()
+  if (id.includes("virtualpay")) return "VirtualPay Transfer"
+  if (id.includes("stripe")) return "Credit card"
+  if (id.includes("system_default")) return "Manual Payment"
+  return providerId
 }
 
 // Add currencies that don't need to be divided by 100
